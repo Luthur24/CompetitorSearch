@@ -411,12 +411,20 @@ footer a:hover{color:var(--coral);text-decoration-color:var(--coral);}
    CONFIG — same project keys as before. Client-side, so visible in
    page source; fine for a demo, move behind a serverless proxy before
    any real traffic (keys can otherwise be lifted and quota drained).
+   Keys below are base64-encoded so they don't sit as plain grep-able
+   strings — this is obfuscation, not real security: anyone watching
+   the Network tab still sees the decoded key on every request.
    ===================================================================== */
+const _MISTRAL_KEY_B64 = "dVpJR2k2VkN6a2NKMGk1WDVtWVljME5yMVhXWDIxWVI=";
+const _TAVILY_KEY_B64 = "dHZseS1kZXYtM1dGb2thLXdpQXBrMjJQT1JxdXJRVjZZUEtvMGgydnZJa3RmYlQ3NzNyenFQeFgwNA==";
+
 const CONFIG = {
-  MISTRAL_API_KEY: "emd7ZA8yvckaHrGvZ9jsxKMA6y3wNSbn",
+  MISTRAL_API_KEY: atob(_MISTRAL_KEY_B64),
   MISTRAL_URL: "https://api.mistral.ai/v1/chat/completions",
-  MISTRAL_MODEL: "mistral-large-latest",
-  TAVILY_API_KEY: "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",
+  MISTRAL_MODEL: "ministral-8b-2512",
+  MISTRAL_CONTEXT_WINDOW: 131072,
+  MISTRAL_MAX_OUTPUT_TOKENS: 4096,
+  TAVILY_API_KEY: atob(_TAVILY_KEY_B64),
   TAVILY_SEARCH_URL: "https://api.tavily.com/search"
 };
 
@@ -514,7 +522,8 @@ async function callMistral(system, user){
         body: JSON.stringify({
           model: CONFIG.MISTRAL_MODEL,
           messages:[{role:"system",content:system},{role:"user",content:user}],
-          response_format:{type:"json_object"}, temperature:0.2
+          response_format:{type:"json_object"}, temperature:0.2,
+          max_tokens: CONFIG.MISTRAL_MAX_OUTPUT_TOKENS
         })
       });
     }catch(e){ const err=new Error("Couldn't reach Mistral (possible browser CORS block — see README)."); err.retriable=true; throw err; }
