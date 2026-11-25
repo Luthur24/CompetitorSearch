@@ -408,25 +408,19 @@ footer a:hover{color:var(--coral);text-decoration-color:var(--coral);}
 
 <script>
 /* =====================================================================
-   CONFIG — same project keys as before. Client-side, so visible in
-   page source; fine for a demo, move behind a serverless proxy before
-   any real traffic (keys can otherwise be lifted and quota drained).
-   Keys below are base64-encoded so they don't sit as plain grep-able
-   strings — this is obfuscation, not real security: anyone watching
-   the Network tab still sees the decoded key on every request.
+   CONFIG — all AI/search calls go through the backend (hosted on Render).
+   No API keys live in the browser any more.
    ===================================================================== */
-const _MISTRAL_KEY_B64 = "dVpJR2k2VkN6a2NKMGk1WDVtWVljME5yMVhXWDIxWVI=";
-const _TAVILY_KEY_B64 = "dHZseS1kZXYtM1dGb2thLXdpQXBrMjJQT1JxdXJRVjZZUEtvMGgydnZJa3RmYlQ3NzNyenFQeFgwNA==";
-
 const CONFIG = {
-  MISTRAL_API_KEY: atob(_MISTRAL_KEY_B64),
-  MISTRAL_URL: "https://api.mistral.ai/v1/chat/completions",
-  MISTRAL_MODEL: "open-mistral-nemo",
-  MISTRAL_CONTEXT_WINDOW: 131072,
-  MISTRAL_MAX_OUTPUT_TOKENS: 4096,
-  TAVILY_API_KEY: atob(_TAVILY_KEY_B64),
-  TAVILY_SEARCH_URL: "https://api.tavily.com/search"
+  BACKEND_URL: "https://competitorsearch-backend.onrender.com",
+  LLM_MAX_OUTPUT_TOKENS: 4096
 };
+
+// Render's free tier sleeps after ~15 min idle. Ping on landing, then every 5 minutes
+// for as long as this page stays open, so the backend stays awake.
+const pingBackend = ()=>fetch(CONFIG.BACKEND_URL + "/health").catch(()=>{});
+pingBackend();
+setInterval(pingBackend, 5*60*1000);
 
 const queryInput = document.getElementById("queryInput");
 const searchBtn = document.getElementById("searchBtn");
@@ -535,34 +529,29 @@ async function withRetry(fn, retries=1, delay=1200){
   }
 }
 
-async function callMistral(system, user){
+async function callLLM(system, user){
   return withRetry(async ()=>{
     let res;
     try{
-      res = await fetch(CONFIG.MISTRAL_URL, {
+      res = await fetch(CONFIG.BACKEND_URL + "/api/llm", {
         method:"POST",
-        headers:{ "Content-Type":"application/json", "Authorization":`Bearer ${CONFIG.MISTRAL_API_KEY}` },
-        body: JSON.stringify({
-          model: CONFIG.MISTRAL_MODEL,
-          messages:[{role:"system",content:system},{role:"user",content:user}],
-          response_format:{type:"json_object"}, temperature:0.2,
-          max_tokens: CONFIG.MISTRAL_MAX_OUTPUT_TOKENS
-        })
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ system, user, max_tokens: CONFIG.LLM_MAX_OUTPUT_TOKENS, temperature: 0.2 })
       });
-    }catch(e){ const err=new Error(`Couldn't reach Mistral (${errMsg(e)}) — network issue, browser CORS block, or an ad-blocker.`); err.retriable=true; throw err; }
-    if(!res.ok) throw await httpError("Mistral", res);
+    }catch(e){ const err=new Error(`Couldn't reach the backend (${errMsg(e)}) — it may be waking up, or there's a network issue.`); err.retriable=true; throw err; }
+    if(!res.ok) throw await httpError("AI", res);
     let data;
     try{ data = await res.json(); }
-    catch(e){ throw new Error(`Mistral returned a non-JSON response: ${errMsg(e)}`); }
-    const raw = data?.choices?.[0]?.message?.content;
-    if(!raw) throw new Error(`Mistral returned no content. Full response: ${JSON.stringify(data).slice(0,400)}`);
-    const finish = data?.choices?.[0]?.finish_reason;
+    catch(e){ throw new Error(`Backend returned a non-JSON response: ${errMsg(e)}`); }
+    const raw = data?.content;
+    if(!raw) throw new Error(`AI returned no content. Full response: ${JSON.stringify(data).slice(0,400)}`);
+    const finish = data?.finish_reason;
     try{ return JSON.parse(raw); }
     catch(e1){
       try{ return JSON.parse(raw.replace(/```json|```/g,"").trim()); }
       catch(e2){
-        const cut = finish==="length" ? " Output was cut off at the token limit (finish_reason=length)." : "";
-        throw new Error(`Mistral reply wasn't valid JSON (${errMsg(e2)}).${cut} Starts with: ${raw.slice(0,200)}`);
+        const cut = finish==="length" ? " Output was cut off at the token limit." : "";
+        throw new Error(`AI reply wasn't valid JSON (${errMsg(e2)}).${cut} Starts with: ${raw.slice(0,200)}`);
       }
     }
   });
@@ -572,36 +561,36 @@ async function tavilySearch(query, maxResults=20){
   return withRetry(async ()=>{
     let res;
     try{
-      res = await fetch(CONFIG.TAVILY_SEARCH_URL, {
+      res = await fetch(CONFIG.BACKEND_URL + "/api/search", {
         method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ api_key: CONFIG.TAVILY_API_KEY, query, search_depth:"advanced", include_answer:true, max_results:maxResults })
+        body: JSON.stringify({ query, max_results: Math.min(20, maxResults) })
       });
-    }catch(e){ const err=new Error(`Couldn't reach Tavily (${errMsg(e)}) — network issue, CORS block, or an ad-blocker.`); err.retriable=true; throw err; }
-    if(!res.ok) throw await httpError("Tavily", res);
+    }catch(e){ const err=new Error(`Couldn't reach the backend (${errMsg(e)}) — it may be waking up, or there's a network issue.`); err.retriable=true; throw err; }
+    if(!res.ok) throw await httpError("Search", res);
     try{ return await res.json(); }
-    catch(e){ throw new Error(`Tavily returned a non-JSON response: ${errMsg(e)}`); }
+    catch(e){ throw new Error(`Search returned a non-JSON response: ${errMsg(e)}`); }
   });
 }
 
-// ---- Stage 1: Mistral parses natural language into a real search intent ----
+// ---- Stage 1: the AI parses natural language into a real search intent ----
 async function parseIntent(raw){
   const sys = `You turn a casual, natural-language request about competitors into a precise web search query. Respond ONLY with strict JSON: {"refined_query":"...","subject_label":"short human label, e.g. 'Expense management competitors to Ramp'"}. Keep refined_query concrete and searchable — include real product/company names if the user gave any.`;
-  return callMistral(sys, raw);
+  return callLLM(sys, raw);
 }
 
 // ---- Refine: re-filter/re-rank the EXISTING field against a free-text ask, no new web search ----
 async function refineField(subjectLabel, refinementText, companies){
   const sys = `You are given an existing list of structured competitor companies and a free-text refinement from the user (e.g. "SMB only", "exclude public companies", "more enterprise-focused"). Filter and/or reorder the existing companies to match the refinement — do NOT invent new companies and do NOT invent new facts; only use what's already provided in each company's fields. You may remove companies that clearly fail the refinement. You may adjust "similarity" to reflect fit to the refined ask specifically, keeping it a precise 0-100 judgment (not rounded to a multiple of 5 or 10, not duplicated across companies unless truly tied). Keep every other field (name, domain, tagline, positioning, signals, tags, confidence, founded) exactly as given for every company you keep. If the refinement can't be meaningfully evaluated from the existing data, keep all companies unchanged and say so in "note". Respond ONLY with strict JSON: {"companies":[...same shape as given...],"note":"one short sentence on what changed, or why nothing did"}`;
   const user = `Subject: ${subjectLabel}\n\nRefinement: ${refinementText}\n\nExisting companies:\n${JSON.stringify(companies)}`;
-  return callMistral(sys, user);
+  return callLLM(sys, user);
 }
 
-// ---- Stage 3: Mistral structures search results into the field of companies ----
+// ---- Stage 3: the AI structures search results into the field of companies ----
 async function structureField(subjectLabel, searchData){
   const sys = `You structure raw web search results into a short, honest field of real, named competitors. Never invent a company, domain, or fact not supported by the given context. If evidence is thin, return fewer companies rather than padding, and say so in "note". For "founded", only give a value if the context supports it (format "YYYY-MM" if month is known, else just "YYYY"); if not found, use an empty string — never guess. For "similarity", grade 0-100: how closely this company actually matches what the user is looking for (the subject: "${subjectLabel}"), not how confident you are in the facts. Reason about each company independently and land on the single specific number that reflects your real judgment of fit — do not round to a multiple of 5 or 10, and do not reuse the same number across companies unless two are genuinely, precisely equally good a match. Treat this as a continuous, precise measurement, not a bucket like "high/medium/low" translated into a number. Two companies that differ even slightly in fit should get different scores (e.g. 78 vs 82, not both 80). Prioritize accuracy over tidiness. Respond ONLY with strict JSON:
 {"companies":[{"name":"...","domain":"example.com","tagline":"one plain sentence, what they do","positioning":"1-2 sentences on how they differentiate in this field","signals":["short factual bullet","short factual bullet","short factual bullet"],"tags":["category tag","stage or size tag"],"confidence":"verified"|"estimate"|"unclear","founded":"YYYY-MM or YYYY or empty string","similarity":0}],"note":"one sentence caveat if evidence was thin, else empty string"}`;
   const user = `Subject: ${subjectLabel}\n\nSearch context:\n${JSON.stringify(searchData).slice(0,16000)}\n\nList up to 18 real, named companies found in the context.`;
-  return callMistral(sys, user);
+  return callLLM(sys, user);
 }
 
 /* =====================================================================
@@ -629,14 +618,14 @@ const ENRICHABLE_FIELDS = ["tagline","positioning","signals","tags","confidence"
 async function identifyGaps(companies, subjectLabel){
   const sys = `You review a structured list of competitor companies and spot weak spots — any field that is missing, thin, generic, or likely wrong. Check every one of these fields, not just one: ${ENRICHABLE_FIELDS.join(", ")}. Examples worth flagging: "founded" empty or only a bare year with no month; "positioning" that's a generic fallback rather than real differentiation; "signals" with fewer than 2 concrete, specific bullets; "tagline" empty or vague; "confidence" of "unclear"; "domain" that looks guessed rather than confirmed (e.g. just the company name plus ".com"); "tags" that are missing or too generic to be useful. Never flag "name" or "similarity" — those aren't fact gaps a search can fix. Don't flag a field that's already specific, concrete, and well-supported. For each gap, name the exact company, the exact field key, and what's missing or wrong in a few words. Then decide on ONE short, concrete web search query — written the way you'd actually search — that would plausibly resolve as many of this batch's gaps as possible at once. Propose at most ${MAX_GAPS_PER_PASS} gaps, fewer if there simply aren't that many worth chasing. Respond ONLY with strict JSON: {"gaps":[{"company":"exact company name","field":"one of ${ENRICHABLE_FIELDS.join("|")}","need":"short description of what's missing or wrong"}],"search_query":"one concrete web search query covering this batch"}`;
   const user = `Subject: ${subjectLabel || ""}\n\nCompanies:\n${JSON.stringify((companies||[]).map(c=>({name:c.name,domain:c.domain,tagline:c.tagline,positioning:c.positioning,signals:c.signals,tags:c.tags,confidence:c.confidence,founded:c.founded})))}`;
-  return callMistral(sys, user);
+  return callLLM(sys, user);
 }
 
 // ---- Revision stage: merge freshly fetched context back into the structured field ----
 async function reviseField(companies, gaps, searchData){
   const sys = `You are given a structured list of competitor companies, a list of specific gaps that were identified (each tied to one company and one named field), and one batch of web search results gathered to cover all of those gaps at once. For each gap, update ONLY the named field on the named company, and only where the search results actually support a better value — the results may only cover some of the gaps, that's fine, leave the rest exactly as they were. Never touch "name" or "similarity". Keep each field's type as given ("signals" and "tags" are arrays of short strings; the rest are plain strings). For "founded" prefer a full "YYYY-MM" value if a specific month is supported, else keep it "YYYY" — never invent a month or year the results don't back up. Never invent any fact not supported by the results. If nothing in the results speaks to a given gap, leave that field untouched. Leave every field not named in a gap, and every company not named in a gap, completely untouched. Return the FULL companies array, same shape, length, and order as given. Respond ONLY with strict JSON: {"companies":[...]}`;
   const user = `Current companies:\n${JSON.stringify(companies)}\n\nGaps this batch was meant to cover:\n${JSON.stringify(gaps)}\n\nBatched search results:\n${JSON.stringify(searchData).slice(0,16000)}`;
-  return callMistral(sys, user);
+  return callLLM(sys, user);
 }
 
 // Runs the reflect -> self-directed re-search -> revise loop, up to
@@ -857,13 +846,13 @@ async function runSearch(){
   refineClearBtn.classList.remove("active");
   renderSkeleton();
   setStatus("Reading your request…");
-  let stage = "reading your request (Mistral)";
+  let stage = "reading your request (Gemini)";
   try{
     const intent = await parseIntent(raw);
     stage = "web search (Tavily)";
     setStatus(`Searching: ${intent.refined_query}`.slice(0,70));
     const searchData = await tavilySearch(intent.refined_query || raw);
-    stage = "structuring results (Mistral)";
+    stage = "structuring results (Gemini)";
     setStatus("Structuring the field…");
     const parsed = await structureField(intent.subject_label || raw, searchData);
     const sources = (searchData.results || []).map(r=>r.url).filter(Boolean);
