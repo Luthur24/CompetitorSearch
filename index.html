@@ -494,6 +494,18 @@ body.set-open .set-drawer{transform:none;visibility:visible;}
         </div>
         <p class="set-hint">After the first results, the app can spot missing details (like founding date or how a company is positioned) and search again to fill them in. Off is fastest. Each round adds detail and waiting time.</p>
       </div>
+      <div class="set-item">
+        <div class="set-top"><label for="setGaps">Weak spots chased per round</label><span class="set-pill" id="setGapsVal"></span></div>
+        <input class="set-range" type="range" id="setGaps" min="2" max="10" step="1">
+        <div class="set-scale"><span>2 · narrower</span><span>10 · broader</span></div>
+        <p class="set-hint">How many missing or weak details each research round tries to fix at once. Higher catches more gaps per round, but each round takes a little longer.</p>
+      </div>
+    </section>
+    <section class="set-sec"><h3>Card detail</h3>
+      <div class="set-item">
+        <div class="set-top"><span id="setIntelLbl">Competitor-intel fields</span><button type="button" class="switch" id="setIntel" role="switch" aria-checked="true" aria-labelledby="setIntelLbl"></button></div>
+        <p class="set-hint">On: each card also researches pricing, funding, team size, target segment, recent news, strengths/weaknesses, reviews, geography, integrations and a threat-level verdict. Off: just the quick overview. More fields = slower, more thorough searches.</p>
+      </div>
     </section>
   </div>
   <div class="set-foot"><button type="button" class="set-reset" id="setReset">Reset to defaults</button><button type="button" class="set-done" id="setDone">Done</button></div>
@@ -518,6 +530,8 @@ const CONFIG = {
   MAX_ENRICHMENT_PASSES: 2,   // gap-filling passes after the first structuring step. 0 = fastest. ?passes=0..5
   MAX_COMPANIES: 10,          // how many companies the AI lists. Fewer = faster.      ?max=3..25
   SEARCH_DEPTH: "advanced",   // "basic" = fast, "advanced" = slower but deeper.      ?depth=advanced
+  GAPS_PER_PASS: 6,           // weak fields chased per enrichment round.              ?gaps=2..10
+  INTEL: true,                // research the extra competitor-tracking fields.        ?intel=0
   CACHE_HOURS: 24,            // backend remembers identical searches this long. 0 = off. ?cache=0..168
   STREAM: true                // show companies as the AI writes them.                 ?stream=0
 };
@@ -528,23 +542,28 @@ const CONFIG = {
   let v;
   if((v=num("passes",0,5))!==null) CONFIG.MAX_ENRICHMENT_PASSES = Math.round(v);
   if((v=num("max",3,25))!==null)   CONFIG.MAX_COMPANIES = Math.round(v);
+  if((v=num("gaps",2,10))!==null)  CONFIG.GAPS_PER_PASS = Math.round(v);
   if((v=num("cache",0,168))!==null) CONFIG.CACHE_HOURS = v;
   if(q.get("depth")==="advanced" || q.get("depth")==="basic") CONFIG.SEARCH_DEPTH = q.get("depth");
   if(q.get("stream")==="0") CONFIG.STREAM = false;
   if(q.get("stream")==="1") CONFIG.STREAM = true;
+  if(q.get("intel")==="0") CONFIG.INTEL = false;
+  if(q.get("intel")==="1") CONFIG.INTEL = true;
 })();
 
 /* ---- user-facing search settings (URL params still win when present) ---- */
 (function(){
   const KEY="cs_settings_v1", up=new URLSearchParams(location.search);
-  const DEF={max:10,depth:"advanced",passes:2,stream:true};
+  const DEF={max:10,depth:"advanced",passes:2,stream:true,gaps:6,intel:true};
   let sv={}; try{ sv=JSON.parse(localStorage.getItem(KEY)||"{}")||{}; }catch(e){}
   const num=(v,lo,hi,d)=>{ v=Math.round(Number(v)); return Number.isFinite(v)&&v>=lo&&v<=hi?v:d; };
   const S={
     max: up.has("max") ? CONFIG.MAX_COMPANIES : num(sv.max,3,25,DEF.max),
     depth: up.has("depth") ? CONFIG.SEARCH_DEPTH : ((sv.depth==="advanced"||sv.depth==="basic") ? sv.depth : DEF.depth),
     passes: up.has("passes") ? CONFIG.MAX_ENRICHMENT_PASSES : num(sv.passes,0,5,DEF.passes),
-    stream: up.has("stream") ? CONFIG.STREAM : (typeof sv.stream==="boolean" ? sv.stream : DEF.stream)
+    stream: up.has("stream") ? CONFIG.STREAM : (typeof sv.stream==="boolean" ? sv.stream : DEF.stream),
+    gaps: up.has("gaps") ? CONFIG.GAPS_PER_PASS : num(sv.gaps,2,10,DEF.gaps),
+    intel: up.has("intel") ? CONFIG.INTEL : (typeof sv.intel==="boolean" ? sv.intel : DEF.intel)
   };
   const $=id=>document.getElementById(id), drawer=$("setDrawer"), opener=$("setOpen");
   function render(){
@@ -552,10 +571,13 @@ const CONFIG = {
     document.querySelectorAll("#setDepth .opt").forEach(b=>b.setAttribute("aria-checked",String(b.dataset.v===S.depth)));
     document.querySelectorAll("#setPasses button").forEach(b=>b.setAttribute("aria-checked",String(+b.dataset.v===S.passes)));
     $("setStream").setAttribute("aria-checked",String(S.stream));
+    $("setGaps").value=S.gaps; $("setGaps").style.setProperty("--p",((S.gaps-2)/8*100)+"%"); $("setGapsVal").textContent=S.gaps;
+    $("setIntel").setAttribute("aria-checked",String(S.intel));
     opener.classList.toggle("custom",Object.keys(DEF).some(k=>S[k]!==DEF[k]));
   }
   function change(){
     CONFIG.MAX_COMPANIES=S.max; CONFIG.SEARCH_DEPTH=S.depth; CONFIG.MAX_ENRICHMENT_PASSES=S.passes; CONFIG.STREAM=S.stream;
+    CONFIG.GAPS_PER_PASS=S.gaps; CONFIG.INTEL=S.intel;
     render();
     try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
   }
@@ -565,6 +587,8 @@ const CONFIG = {
   document.querySelectorAll("#setDepth .opt").forEach(b=>b.addEventListener("click",()=>{ S.depth=b.dataset.v; change(); }));
   document.querySelectorAll("#setPasses button").forEach(b=>b.addEventListener("click",()=>{ S.passes=+b.dataset.v; change(); }));
   $("setStream").addEventListener("click",()=>{ S.stream=!S.stream; change(); });
+  $("setGaps").addEventListener("input",e=>{ S.gaps=+e.target.value; change(); });
+  $("setIntel").addEventListener("click",()=>{ S.intel=!S.intel; change(); });
   $("setReset").addEventListener("click",()=>{ Object.assign(S,DEF); change(); });
   opener.addEventListener("click",open);
   $("setClose").addEventListener("click",close);
@@ -806,31 +830,37 @@ async function callLLMStream(system, user, onText){
 }
 
 // ---- Stage 1: the AI parses natural language into a real search intent ----
+// Takes the front-end's current settings so the very first query is built with
+// the right target in mind (how many companies are wanted, how deep to dig),
+// instead of Tavily being asked something generic and the gap only surfacing later.
 async function parseIntent(raw){
-  const sys = `You turn a casual, natural-language request about competitors into ONE detailed web search query that a search engine will answer in a single pass, so the results leave no gaps. Respond ONLY with strict JSON: {"refined_query":"...","subject_label":"short human label, e.g. 'Expense management competitors to Ramp'"}.
+  const sys = `You turn a casual, natural-language request about competitors into ONE detailed web search query that a search engine will answer in a single pass, so the results leave no gaps. You are told upfront how many distinct named companies the final list needs to contain and how deep the research should go — write a query ambitious and broad enough to surface at least that many distinct, real, named companies, not just one or two obvious ones. Respond ONLY with strict JSON: {"refined_query":"...","subject_label":"short human label, e.g. 'Expense management competitors to Ramp'"}.
 Rules for refined_query:
 - Name the exact product category and the user's own company/product if given, plus close synonyms (e.g. "AI memory layer", "persistent memory for LLM agents").
-- Aim at pages that list many companies at once: "top", "best", "alternatives to", "competitors of", "comparison", "market map".
+- Aim at pages that list many companies at once: "top", "best", "alternatives to", "competitors of", "comparison", "market map" — and explicitly ask for a list of at least the target number of companies, so thin single-company pages don't dominate the results.
 - Ask for the facts the results must contain for EACH company: official website, year founded, headquarters, what the product does, target customers, pricing or funding stage.
 - Include real company names the user mentioned, and well-known players in that space you are confident exist.
 - One flowing query, plain text, no quotes or operators, under 350 characters.`;
-  const r = await callLLM(sys, raw);
+  const user = `Target company count: ${CONFIG.MAX_COMPANIES}\nSearch depth requested: ${CONFIG.SEARCH_DEPTH === "advanced" ? "deep — favor thoroughness and lesser-known players over speed" : "fast — a quick, mainstream scan is fine"}\n\nUser's request: ${raw}`;
+  const r = await callLLM(sys, user);
   if(r && r.refined_query) r.refined_query = String(r.refined_query).slice(0, 390);
   return r;
 }
 
 // ---- Refine: re-filter/re-rank the EXISTING field against a free-text ask, no new web search ----
 async function refineField(subjectLabel, refinementText, companies){
-  const sys = `You are given an existing list of structured competitor companies and a free-text refinement from the user (e.g. "SMB only", "exclude public companies", "more enterprise-focused"). Filter and/or reorder the existing companies to match the refinement — do NOT invent new companies and do NOT invent new facts; only use what's already provided in each company's fields. You may remove companies that clearly fail the refinement. You may adjust "similarity" to reflect fit to the refined ask specifically, keeping it a precise 0-100 judgment (not rounded to a multiple of 5 or 10, not duplicated across companies unless truly tied). Keep every other field (name, domain, tagline, positioning, signals, tags, confidence, founded) exactly as given for every company you keep. If the refinement can't be meaningfully evaluated from the existing data, keep all companies unchanged and say so in "note". Respond ONLY with strict JSON: {"companies":[...same shape as given...],"note":"one short sentence on what changed, or why nothing did"}`;
+  const sys = `You are given an existing list of structured competitor companies and a free-text refinement from the user (e.g. "SMB only", "exclude public companies", "more enterprise-focused"). Filter and/or reorder the existing companies to match the refinement — do NOT invent new companies and do NOT invent new facts; only use what's already provided in each company's fields. You may remove companies that clearly fail the refinement. You may adjust "similarity" to reflect fit to the refined ask specifically, keeping it a precise 0-100 judgment (not rounded to a multiple of 5 or 10, not duplicated across companies unless truly tied). Keep every other field exactly as given, UNCHANGED AND PRESENT, for every company you keep — this includes every field already on each company object, whatever its name, not just the common ones like tagline or positioning; never drop a field just because it isn't explicitly named here. If the refinement can't be meaningfully evaluated from the existing data, keep all companies unchanged and say so in "note". Respond ONLY with strict JSON: {"companies":[...same shape as given, every field preserved...],"note":"one short sentence on what changed, or why nothing did"}`;
   const user = `Subject: ${subjectLabel}\n\nRefinement: ${refinementText}\n\nExisting companies:\n${JSON.stringify(companies)}`;
   return callLLM(sys, user);
 }
 
 // ---- Stage 3: the AI structures search results into the field of companies ----
 async function structureField(subjectLabel, searchData, onPartial){
-  const sys = `You structure raw web search results into a short, honest field of real, named competitors. Never invent a company, domain, or fact not supported by the given context. If evidence is thin, return fewer companies rather than padding, and say so in "note". For "founded", only give a value if the context supports it (format "YYYY-MM" if month is known, else just "YYYY"); if not found, use an empty string — never guess. For "similarity", grade 0-100: how closely this company actually matches what the user is looking for (the subject: "${subjectLabel}"), not how confident you are in the facts. Reason about each company independently and land on the single specific number that reflects your real judgment of fit — do not round to a multiple of 5 or 10, and do not reuse the same number across companies unless two are genuinely, precisely equally good a match. Treat this as a continuous, precise measurement, not a bucket like "high/medium/low" translated into a number. Two companies that differ even slightly in fit should get different scores (e.g. 78 vs 82, not both 80). Prioritize accuracy over tidiness. Respond ONLY with strict JSON:
-{"companies":[{"name":"...","domain":"example.com","tagline":"one plain sentence, what they do","positioning":"1-2 sentences on how they differentiate in this field","signals":["short factual bullet","short factual bullet","short factual bullet"],"tags":["category tag","stage or size tag"],"confidence":"verified"|"estimate"|"unclear","founded":"YYYY-MM or YYYY or empty string","similarity":0}],"note":"one sentence caveat if evidence was thin, else empty string"}`;
-  const user = `Subject: ${subjectLabel}\n\nSearch context:\n${JSON.stringify(searchData).slice(0,16000)}\n\nList up to ${CONFIG.MAX_COMPANIES} real, named companies found in the context.`;
+  const intelSchema = CONFIG.INTEL ? `,"pricing":"starting price, tiers, or free-plan availability in one short phrase; empty string if not found","funding":"stage + total raised + lead investor if known, e.g. 'Series B, $42M total, led by Acme Ventures'; empty string if not found","team_size":"approx headcount or employee range, e.g. '~120 employees'; empty string if not found","segment":"who they target: SMB, mid-market, enterprise, and/or named industries; empty string if not found","news":["short dated signal, e.g. 'Mar 2026: raised $20M Series B'"],"strengths":["short concrete strength relative to this field"],"weaknesses":["short concrete weakness or gap relative to this field"],"reviews":"review rating/platform plus common sentiment in one short phrase, e.g. '4.3/5 on G2, praised for support, knocked for pricing'; empty string if not found","geography":"primary markets or regions served, short phrase; empty string if not found","integrations":["notable integration or platform, max 4"],"threat_level":"low, medium, or high, plus a few words why, e.g. 'medium — overlaps on mid-market but weaker API'"` : "";
+  const intelNote = CONFIG.INTEL ? ` Also research, for each company, whatever of these the context supports: pricing/packaging, funding and stage, approximate team size, target customer segment, 1-3 recent dated news signals, 2-3 strengths, 2-3 weaknesses (both stated relative to the subject field, not in a vacuum), review sentiment, primary geography, notable integrations, and an overall threat-level verdict with a short reason. Leave any of these as an empty string or empty array — never invent a plausible-sounding placeholder — when the context doesn't support it; a thin intel field is better than a fabricated one.` : "";
+  const sys = `You structure raw web search results into an honest field of real, named competitors. Never invent a company, domain, or fact not supported by the given context. Your target is ${CONFIG.MAX_COMPANIES} distinct, real, named companies — read through the ENTIRE context before deciding you can't find that many, since names are often scattered across several results rather than one list. Only return fewer than the target if, after that full read, the context truly does not support more distinct named companies; when that happens, say plainly in "note" how many you found and why (e.g. "Only 6 distinct named companies appeared in the search context"), rather than quietly under-delivering. Never pad the list with a vague or unnamed entry just to hit the target.${intelNote} For "founded", only give a value if the context supports it (format "YYYY-MM" if month is known, else just "YYYY"); if not found, use an empty string — never guess. For "similarity", grade 0-100: how closely this company actually matches what the user is looking for (the subject: "${subjectLabel}"), not how confident you are in the facts. Reason about each company independently and land on the single specific number that reflects your real judgment of fit — do not round to a multiple of 5 or 10, and do not reuse the same number across companies unless two are genuinely, precisely equally good a match. Treat this as a continuous, precise measurement, not a bucket like "high/medium/low" translated into a number. Two companies that differ even slightly in fit should get different scores (e.g. 78 vs 82, not both 80). Prioritize accuracy over tidiness. Respond ONLY with strict JSON:
+{"companies":[{"name":"...","domain":"example.com","tagline":"one plain sentence, what they do","positioning":"1-2 sentences on how they differentiate in this field","signals":["short factual bullet","short factual bullet","short factual bullet"],"tags":["category tag","stage or size tag"],"confidence":"verified"|"estimate"|"unclear","founded":"YYYY-MM or YYYY or empty string"${intelSchema},"similarity":0}],"note":"one sentence caveat if evidence was thin or the target count wasn't reached, else empty string"}`;
+  const user = `Subject: ${subjectLabel}\n\nSearch context:\n${JSON.stringify(searchData).slice(0,16000)}\n\nFind as close to ${CONFIG.MAX_COMPANIES} real, named companies as the context actually supports — review all of it before concluding there are fewer.`;
   if(CONFIG.STREAM && onPartial){
     try{
       return await callLLMStream(sys, user, text=>{ const c = extractCompanies(text); if(c.length) onPartial(c); });
@@ -855,20 +885,25 @@ async function structureField(subjectLabel, searchData, onPartial){
    calls.
    ===================================================================== */
 let enrichWarnings = [];
-const MAX_GAPS_PER_PASS = 6;
-const ENRICHABLE_FIELDS = ["tagline","positioning","signals","tags","confidence","founded","domain"];
+const BASE_ENRICHABLE_FIELDS = ["tagline","positioning","signals","tags","confidence","founded","domain"];
+const INTEL_ENRICHABLE_FIELDS = ["pricing","funding","team_size","segment","news","strengths","weaknesses","reviews","geography","integrations","threat_level"];
+const ARRAY_FIELDS = ["signals","tags","news","strengths","weaknesses","integrations"];
+// Which fields are in play depends on the current Card detail setting — read live
+// so toggling it mid-session (before the next search) takes effect immediately.
+function enrichableFields(){ return CONFIG.INTEL ? BASE_ENRICHABLE_FIELDS.concat(INTEL_ENRICHABLE_FIELDS) : BASE_ENRICHABLE_FIELDS; }
 
 // ---- Reflection stage: look at what we have across every field, decide what's
 // worth re-querying, and let the model write its own search query for it ----
 async function identifyGaps(companies, subjectLabel){
-  const sys = `You review a structured list of competitor companies and spot weak spots — any field that is missing, thin, generic, or likely wrong. Check every one of these fields, not just one: ${ENRICHABLE_FIELDS.join(", ")}. Examples worth flagging: "founded" empty or only a bare year with no month; "positioning" that's a generic fallback rather than real differentiation; "signals" with fewer than 2 concrete, specific bullets; "tagline" empty or vague; "confidence" of "unclear"; "domain" that looks guessed rather than confirmed (e.g. just the company name plus ".com"); "tags" that are missing or too generic to be useful. Never flag "name" or "similarity" — those aren't fact gaps a search can fix. Don't flag a field that's already specific, concrete, and well-supported. For each gap, name the exact company, the exact field key, and what's missing or wrong in a few words. Then decide on ONE short, concrete web search query — written the way you'd actually search — that would plausibly resolve as many of this batch's gaps as possible at once. Propose at most ${MAX_GAPS_PER_PASS} gaps, fewer if there simply aren't that many worth chasing. Respond ONLY with strict JSON: {"gaps":[{"company":"exact company name","field":"one of ${ENRICHABLE_FIELDS.join("|")}","need":"short description of what's missing or wrong"}],"search_query":"one concrete web search query covering this batch"}`;
-  const user = `Subject: ${subjectLabel || ""}\n\nCompanies:\n${JSON.stringify((companies||[]).map(c=>({name:c.name,domain:c.domain,tagline:c.tagline,positioning:c.positioning,signals:c.signals,tags:c.tags,confidence:c.confidence,founded:c.founded})))}`;
+  const fields = enrichableFields();
+  const sys = `You review a structured list of competitor companies and spot weak spots — any field that is missing, thin, generic, or likely wrong. Check every one of these fields, not just one: ${fields.join(", ")}. Examples worth flagging: "founded" empty or only a bare year with no month; "positioning" that's a generic fallback rather than real differentiation; "signals" with fewer than 2 concrete, specific bullets; "tagline" empty or vague; "confidence" of "unclear"; "domain" that looks guessed rather than confirmed (e.g. just the company name plus ".com"); "tags" that are missing or too generic to be useful${CONFIG.INTEL ? `; "pricing", "funding", "team_size", "segment", "reviews", or "geography" empty or vague; "news" with no dated signals; "strengths" or "weaknesses" with fewer than 2 concrete bullets; "integrations" empty; "threat_level" missing or with no stated reason` : ""}. Never flag "name" or "similarity" — those aren't fact gaps a search can fix. Don't flag a field that's already specific, concrete, and well-supported. For each gap, name the exact company, the exact field key, and what's missing or wrong in a few words. Then decide on ONE short, concrete web search query — written the way you'd actually search — that would plausibly resolve as many of this batch's gaps as possible at once. Propose at most ${CONFIG.GAPS_PER_PASS} gaps, fewer if there simply aren't that many worth chasing. Respond ONLY with strict JSON: {"gaps":[{"company":"exact company name","field":"one of ${fields.join("|")}","need":"short description of what's missing or wrong"}],"search_query":"one concrete web search query covering this batch"}`;
+  const user = `Subject: ${subjectLabel || ""}\n\nCompanies:\n${JSON.stringify((companies||[]).map(c=>{ const o={name:c.name}; fields.forEach(f=>o[f]=c[f]); return o; }))}`;
   return callLLM(sys, user);
 }
 
 // ---- Revision stage: merge freshly fetched context back into the structured field ----
 async function reviseField(companies, gaps, searchData){
-  const sys = `You are given a structured list of competitor companies, a list of specific gaps that were identified (each tied to one company and one named field), and one batch of web search results gathered to cover all of those gaps at once. For each gap, update ONLY the named field on the named company, and only where the search results actually support a better value — the results may only cover some of the gaps, that's fine, leave the rest exactly as they were. Never touch "name" or "similarity". Keep each field's type as given ("signals" and "tags" are arrays of short strings; the rest are plain strings). For "founded" prefer a full "YYYY-MM" value if a specific month is supported, else keep it "YYYY" — never invent a month or year the results don't back up. Never invent any fact not supported by the results. If nothing in the results speaks to a given gap, leave that field untouched. Leave every field not named in a gap, and every company not named in a gap, completely untouched. Return the FULL companies array, same shape, length, and order as given. Respond ONLY with strict JSON: {"companies":[...]}`;
+  const sys = `You are given a structured list of competitor companies, a list of specific gaps that were identified (each tied to one company and one named field), and one batch of web search results gathered to cover all of those gaps at once. For each gap, update ONLY the named field on the named company, and only where the search results actually support a better value — the results may only cover some of the gaps, that's fine, leave the rest exactly as they were. Never touch "name" or "similarity". Keep each field's type as given (${ARRAY_FIELDS.join(", ")} are arrays of short strings; the rest are plain strings). For "founded" prefer a full "YYYY-MM" value if a specific month is supported, else keep it "YYYY" — never invent a month or year the results don't back up. Never invent any fact not supported by the results. If nothing in the results speaks to a given gap, leave that field untouched. Leave every field not named in a gap, and every company not named in a gap, completely untouched. Return the FULL companies array, same shape, length, and order as given. Respond ONLY with strict JSON: {"companies":[...]}`;
   const user = `Current companies:\n${JSON.stringify(companies)}\n\nGaps this batch was meant to cover:\n${JSON.stringify(gaps)}\n\nBatched search results:\n${JSON.stringify(searchData).slice(0,16000)}`;
   return callLLM(sys, user);
 }
@@ -887,10 +922,10 @@ async function enrichGaps(companies, sources, subjectLabel){
     let gapsResp;
     try{ gapsResp = await identifyGaps(current, subjectLabel); }
     catch(e){ console.error(e); enrichWarnings.push(`Pass ${pass+1}, finding gaps: ${errMsg(e)}`); break; }
-    const gaps = (gapsResp.gaps || []).filter(g=>g && g.company && ENRICHABLE_FIELDS.includes(g.field)).slice(0, MAX_GAPS_PER_PASS);
+    const gaps = (gapsResp.gaps || []).filter(g=>g && g.company && enrichableFields().includes(g.field)).slice(0, CONFIG.GAPS_PER_PASS);
     if(!gaps.length) break; // nothing worth chasing — done
 
-    setStatus(`Filling in ${gaps.length} gap${gaps.length>1?"s":""} (pass ${pass+1}/${CONFIG.MAX_ENRICHMENT_PASSES})…`);
+    setStatus(`Research round ${pass+1} of ${CONFIG.MAX_ENRICHMENT_PASSES} — chasing ${gaps.length} weak spot${gaps.length>1?"s":""}…`);
 
     // The model writes its own query for whatever this batch needs, rather
     // than a query template hardcoded to one fact — falls back to a plain
@@ -927,6 +962,40 @@ function simScoreBadge(score){
   const color = simColor(n);
   return `<span class="sim-score" style="color:${color};border-color:${color}33" title="AI-graded match to your search"><span class="dot" style="background:${color}"></span>${n}%</span>`;
 }
+function threatColor(level){
+  const l = (level||"").toLowerCase();
+  if(l.startsWith("high")) return "var(--coral)";
+  if(l.startsWith("medium")) return "var(--amber)";
+  if(l.startsWith("low")) return "var(--emerald)";
+  return "";
+}
+function threatBadge(level){
+  if(!level) return "";
+  const color = threatColor(level);
+  const word = (level.split(/[—-]/)[0] || level).trim();
+  if(!color) return "";
+  return `<span class="sim-score" style="color:${color};border-color:${color}33;margin-left:6px" title="${level}"><span class="dot" style="background:${color}"></span>${word} threat</span>`;
+}
+// Intel dossier sections — only rendered where the field actually has content,
+// so searches run with "Competitor-intel fields" off (or that came back thin)
+// don't show a wall of empty sections.
+function intelSections(c){
+  if(!CONFIG.INTEL) return "";
+  let html = "";
+  if(c.pricing) html += `<div class="dossier-section"><div class="label">Pricing &amp; packaging</div><p>${c.pricing}</p></div>`;
+  if(c.funding) html += `<div class="dossier-section"><div class="label">Funding &amp; stage</div><p>${c.funding}</p></div>`;
+  if(c.team_size || c.segment) html += `<div class="dossier-section"><div class="label">Team &amp; target segment</div><p>${[c.team_size,c.segment].filter(Boolean).join(" · ")}</p></div>`;
+  if((c.news||[]).length) html += `<div class="dossier-section"><div class="label">Recent signals</div><ul>${c.news.map(n=>`<li>${n}</li>`).join("")}</ul></div>`;
+  if((c.strengths||[]).length || (c.weaknesses||[]).length) html += `<div class="dossier-section"><div class="label">Strengths &amp; weaknesses</div>
+    ${(c.strengths||[]).length?`<p style="color:var(--emerald);margin-bottom:6px;">+ ${c.strengths.join(" · ")}</p>`:""}
+    ${(c.weaknesses||[]).length?`<p style="color:var(--coral);">− ${c.weaknesses.join(" · ")}</p>`:""}
+  </div>`;
+  if(c.reviews) html += `<div class="dossier-section"><div class="label">Reviews</div><p>${c.reviews}</p></div>`;
+  if(c.geography) html += `<div class="dossier-section"><div class="label">Geography</div><p>${c.geography}</p></div>`;
+  if((c.integrations||[]).length) html += `<div class="dossier-section"><div class="label">Integrations</div><div class="tags">${c.integrations.map(t=>`<span class="tag-chip">${t}</span>`).join("")}</div></div>`;
+  if(c.threat_level) html += `<div class="dossier-section"><div class="label">Threat level</div><p>${c.threat_level}</p></div>`;
+  return html;
+}
 
 function renderCard(c, idx){
   const card = document.createElement("div");
@@ -935,8 +1004,8 @@ function renderCard(c, idx){
     <div class="row">
       ${logoBadge(c.name, c.domain)}
       <h3>${c.name}</h3>
-      ${simScoreBadge(c.similarity)}
-      <button class="compare-toggle" type="button" data-idx="${idx}" aria-pressed="${compareIdx.has(idx)}" aria-label="Add ${c.name} to compare" title="Add to compare">
+      ${simScoreBadge(c.similarity)}${threatBadge(c.threat_level)}
+      <button class="compare-toggle" type="button" style="margin-left:8px" data-idx="${idx}" aria-pressed="${compareIdx.has(idx)}" aria-label="Add ${c.name} to compare" title="Add to compare">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
       </button>
     </div>
@@ -988,7 +1057,7 @@ function openDossier(idx){
     <div class="row">
       ${logoBadge(c.name, c.domain, "lg")}
       <div><h2>${c.name}</h2><p class="tagline">${c.tagline||""}</p>${currentSearchedAt?`<p class="checked-at">Checked ${formatCheckedAt(currentSearchedAt)} — live research, not a maintained profile</p>`:""}</div>
-      ${simScoreBadge(c.similarity)}
+      ${simScoreBadge(c.similarity)}${threatBadge(c.threat_level)}
     </div>
     <div class="dossier-section">
       <div class="label">Positioning</div>
@@ -1006,6 +1075,7 @@ function openDossier(idx){
       <div class="label">Founded</div>
       <p>${formatFounded(c.founded)}</p>
     </div>
+    ${intelSections(c)}
     <div class="dossier-sources">Sources: ${currentSources.slice(0,5).map(u=>{try{const host=new URL(u).hostname; return `<a href="${u}" target="_blank" rel="noopener" class="source-link"><img class="source-favicon" src="https://www.google.com/s2/favicons?sz=64&domain=${host}" alt="" onerror="this.remove()">${host}</a>`;}catch(e){return "";}}).join(" · ") || "none captured"}</div>
   `;
   document.getElementById("dossierClose").addEventListener("click", closeDossier);
@@ -1238,14 +1308,21 @@ function toggleExportMenu(){
 }
 function csvEscape(v){ const s = (v===undefined||v===null) ? "" : String(v); return `"${s.replace(/"/g,'""')}"`; }
 function buildCSV(){
-  const rows = [["Name","Domain","Tagline","Positioning","Tags","Confidence","Founded","Similarity %","Signals"]];
+  const intelCols = CONFIG.INTEL ? ["Pricing","Funding","Team size","Segment","Threat level","Reviews","Geography","Integrations","Recent news","Strengths","Weaknesses"] : [];
+  const rows = [["Name","Domain","Tagline","Positioning","Tags","Confidence","Founded","Similarity %","Signals",...intelCols]];
   currentCompanies.forEach(c=>{
-    rows.push([
+    const row = [
       c.name||"", c.domain||"", c.tagline||"", c.positioning||"",
       (c.tags||[]).join("; "), c.confidence||"", c.founded||"",
       (c.similarity!==undefined && c.similarity!=="") ? Math.round(Number(c.similarity)) : "",
       (c.signals||[]).join(" | ")
-    ]);
+    ];
+    if(CONFIG.INTEL) row.push(
+      c.pricing||"", c.funding||"", c.team_size||"", c.segment||"", c.threat_level||"",
+      c.reviews||"", c.geography||"", (c.integrations||[]).join("; "),
+      (c.news||[]).join(" | "), (c.strengths||[]).join(" | "), (c.weaknesses||[]).join(" | ")
+    );
+    rows.push(row);
   });
   return rows.map(r=>r.map(csvEscape).join(",")).join("\n");
 }
@@ -1265,10 +1342,14 @@ function downloadCSV(){
 }
 function buildMarkdown(){
   const label = currentSubjectLabel || currentRawQuery;
-  let md = `### ${label}\n\n| Company | Match | Tagline | Confidence | Founded |\n|---|---|---|---|---|\n`;
+  const extraHead = CONFIG.INTEL ? " Funding | Team size | Threat |" : "";
+  const extraSep = CONFIG.INTEL ? "---|---|---|" : "";
+  let md = `### ${label}\n\n| Company | Match | Tagline | Confidence | Founded |${extraHead}\n|---|---|---|---|---|${extraSep}\n`;
   currentCompanies.forEach(c=>{
     const sim = (c.similarity!==undefined && c.similarity!=="") ? `${Math.round(Number(c.similarity))}%` : "—";
-    md += `| ${c.name||""} | ${sim} | ${(c.tagline||"").replace(/\|/g,"/")} | ${c.confidence||""} | ${c.founded||"—"} |\n`;
+    let row = `| ${c.name||""} | ${sim} | ${(c.tagline||"").replace(/\|/g,"/")} | ${c.confidence||""} | ${c.founded||"—"} |`;
+    if(CONFIG.INTEL) row += ` ${(c.funding||"—").replace(/\|/g,"/")} | ${(c.team_size||"—").replace(/\|/g,"/")} | ${(c.threat_level||"—").replace(/\|/g,"/")} |`;
+    md += row + "\n";
   });
   md += `\n_via CompetitorSearch_`;
   return md;
@@ -1328,6 +1409,15 @@ function openCompareView(){
           <div class="compare-field"><div class="label">Tags</div><p>${(c.tags||[]).join(", ")||"—"}</p></div>
           <div class="compare-field"><div class="label">Confidence</div><p>${c.confidence||"unclear"}</p></div>
           <div class="compare-field"><div class="label">Founded</div><p>${formatFounded(c.founded)}</p></div>
+          ${CONFIG.INTEL ? `
+          <div class="compare-field"><div class="label">Pricing</div><p>${c.pricing||"—"}</p></div>
+          <div class="compare-field"><div class="label">Funding</div><p>${c.funding||"—"}</p></div>
+          <div class="compare-field"><div class="label">Team size</div><p>${c.team_size||"—"}</p></div>
+          <div class="compare-field"><div class="label">Segment</div><p>${c.segment||"—"}</p></div>
+          <div class="compare-field"><div class="label">Strengths</div><ul>${(c.strengths||[]).map(s=>`<li>${s}</li>`).join("")||"<li>—</li>"}</ul></div>
+          <div class="compare-field"><div class="label">Weaknesses</div><ul>${(c.weaknesses||[]).map(s=>`<li>${s}</li>`).join("")||"<li>—</li>"}</ul></div>
+          <div class="compare-field"><div class="label">Threat level</div><p>${c.threat_level||"—"}</p></div>
+          ` : ""}
         </div>
       `).join("")}
     </div>
