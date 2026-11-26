@@ -312,6 +312,64 @@ footer a:hover{color:var(--coral);text-decoration-color:var(--coral);}
 .traction-sep{width:1px;height:10px;background:var(--border);align-self:center;}
 @media(max-width:560px){.traction-bar{gap:8px;padding-top:6px;}.traction-sep{display:none;}}
 @media(max-width:480px){.traction-val{font-size:10px;}.traction-label{font-size:8.5px;}}
+
+/* ---------- search settings (drawer) ---------- */
+.searchbar input{min-width:0;}
+.set-open{position:relative;flex:none;width:42px;height:42px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid transparent;border-radius:11px;color:var(--dim);transition:color .15s,background .15s,border-color .15s;}
+.set-open:hover{color:var(--text);background:var(--elevated);border-color:var(--border);}
+.set-open .dot{position:absolute;top:8px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--coral);display:none;box-shadow:0 0 0 2px var(--surface);}
+.set-open.custom .dot{display:block;}
+.set-scrim{position:fixed;inset:0;z-index:1000;background:rgba(6,7,9,.6);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s;}
+.set-drawer{position:fixed;top:0;right:0;bottom:0;z-index:1010;width:min(420px,100%);display:flex;flex-direction:column;background:var(--elevated);border-left:1px solid var(--border);box-shadow:-20px 0 50px rgba(0,0,0,.35);transform:translateX(104%);visibility:hidden;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility .28s;}
+body.set-open{overflow:hidden;}
+body.set-open .set-scrim{opacity:1;visibility:visible;}
+body.set-open .set-drawer{transform:none;visibility:visible;}
+.set-grab{display:none;}
+.set-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:22px 22px 16px;border-bottom:1px solid var(--border-soft);}
+.set-head h2{font-family:var(--display);font-size:18px;margin:0 0 4px;font-weight:700;letter-spacing:-.01em;}
+.set-head p{margin:0;font-size:12.5px;color:var(--faint);line-height:1.4;}
+.set-x{flex:none;width:32px;height:32px;border-radius:9px;background:none;border:1px solid var(--border);color:var(--dim);font-size:14px;}
+.set-x:hover{border-color:var(--coral);color:var(--text);}
+.set-body{flex:1;overflow-y:auto;padding:6px 22px 24px;}
+.set-sec{padding-top:20px;}
+.set-sec > h3{font-family:var(--display);font-size:13px;font-weight:600;color:var(--dim);margin:0 0 4px;}
+.set-item{padding:14px 0;border-bottom:1px solid var(--border-soft);}
+.set-item:last-child{border-bottom:none;}
+.set-top{display:flex;justify-content:space-between;align-items:center;gap:12px;font-family:var(--display);font-size:14.5px;font-weight:600;}
+.set-pill{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--coral);background:var(--coral-dim);border-radius:999px;padding:3px 10px;min-width:34px;text-align:center;}
+.set-hint{font-size:12.5px;color:var(--dim);line-height:1.55;margin:8px 0 0;}
+.set-range{-webkit-appearance:none;appearance:none;display:block;width:100%;height:6px;border-radius:99px;margin:18px 0 6px;background:linear-gradient(90deg,var(--coral) var(--p,0%),var(--border) var(--p,0%));outline:none;}
+.set-range::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#fff;border:3px solid var(--coral);box-shadow:0 2px 8px rgba(0,0,0,.45);cursor:pointer;}
+.set-range::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid var(--coral);box-shadow:0 2px 8px rgba(0,0,0,.45);cursor:pointer;}
+.set-range:focus-visible{box-shadow:0 0 0 4px rgba(255,107,74,.25);}
+.set-scale{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--faint);}
+.opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;}
+.opt{text-align:left;display:flex;flex-direction:column;gap:5px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:13px;color:var(--text);transition:border-color .15s,background .15s;}
+.opt svg{color:var(--faint);margin-bottom:2px;}
+.opt b{font-family:var(--display);font-size:13.5px;font-weight:600;}
+.opt small{font-size:12px;color:var(--dim);line-height:1.45;}
+.opt:hover{border-color:var(--faint);}
+.opt[aria-checked="true"]{border-color:var(--coral);background:var(--coral-dim);}
+.opt[aria-checked="true"] svg{color:var(--coral);}
+.seg6{display:flex;gap:4px;background:var(--bg);border:1px solid var(--border);border-radius:11px;padding:3px;margin-top:12px;}
+.seg6 button{flex:1;background:none;border:none;border-radius:8px;color:var(--dim);padding:9px 0;font-size:13px;font-weight:500;font-family:var(--mono);}
+.seg6 button:hover{color:var(--text);}
+.seg6 button[aria-checked="true"]{background:var(--coral);color:#1a0d08;font-weight:700;}
+.switch{width:44px;height:26px;border-radius:999px;border:1px solid var(--border);background:var(--bg);position:relative;flex:none;padding:0;transition:background .15s,border-color .15s;}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--dim);transition:transform .15s,background .15s;}
+.switch[aria-checked="true"]{background:var(--coral-dim);border-color:var(--coral);}
+.switch[aria-checked="true"]::after{transform:translateX(18px);background:var(--coral);}
+.set-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 22px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--border-soft);background:var(--elevated);}
+.set-reset{background:none;border:none;color:var(--dim);font-size:13px;padding:8px 2px;text-decoration:underline;text-decoration-color:var(--border);}
+.set-reset:hover{color:var(--coral);text-decoration-color:var(--coral);}
+.set-done{background:var(--coral);color:#1a0d08;border:none;border-radius:11px;padding:11px 26px;font-weight:700;font-size:14px;}
+.set-drawer button:focus-visible,.set-open:focus-visible{outline:2px solid var(--coral);outline-offset:2px;}
+@media(max-width:640px){
+  .set-drawer{top:auto;width:100%;max-height:90vh;border-left:none;border-top:1px solid var(--border);border-radius:22px 22px 0 0;transform:translateY(104%);box-shadow:0 -20px 50px rgba(0,0,0,.4);}
+  .set-grab{display:block;width:38px;height:4px;border-radius:4px;background:var(--border);margin:10px auto 0;}
+  .set-head{padding-top:14px;}
+}
+@media(prefers-reduced-motion:reduce){.set-drawer,.set-scrim,.switch,.switch::after{transition:none;}}
 </style>
 </head>
 <body>
@@ -342,6 +400,7 @@ footer a:hover{color:var(--coral);text-decoration-color:var(--coral);}
 <div class="search-wrap">
   <div class="searchbar">
     <input id="queryInput" placeholder="e.g. who competes with Ramp for mid-size companies?" autocomplete="off">
+    <button class="set-open" id="setOpen" type="button" aria-label="Search settings" aria-haspopup="dialog" title="Search settings"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="9" cy="7" r="2.4" fill="var(--surface)"/><circle cx="15" cy="17" r="2.4" fill="var(--surface)"/></svg><span class="dot"></span></button>
     <button id="searchBtn">Search</button>
   </div>
   <div class="examples">
@@ -400,6 +459,46 @@ footer a:hover{color:var(--coral);text-decoration-color:var(--coral);}
   <button type="button" class="cb-clear" id="compareClearBtn">Clear</button>
 </div>
 
+<div class="set-scrim" id="setScrim"></div>
+<aside class="set-drawer" id="setDrawer" role="dialog" aria-modal="true" aria-labelledby="setTitle" aria-hidden="true">
+  <div class="set-grab" aria-hidden="true"></div>
+  <div class="set-head">
+    <div><h2 id="setTitle">Search settings</h2><p>Applies to your next search. Saved on this device.</p></div>
+    <button class="set-x" id="setClose" type="button" aria-label="Close settings">✕</button>
+  </div>
+  <div class="set-body">
+    <section class="set-sec"><h3>Results</h3>
+      <div class="set-item">
+        <div class="set-top"><label for="setMax">Number of companies</label><span class="set-pill" id="setMaxVal"></span></div>
+        <input class="set-range" type="range" id="setMax" min="3" max="25" step="1">
+        <div class="set-scale"><span>3 · quicker</span><span>25 · fuller</span></div>
+        <p class="set-hint">How many competitors to list. Fewer results come back faster.</p>
+      </div>
+      <div class="set-item">
+        <div class="set-top"><span id="setStreamLbl">Show results as they appear</span><button type="button" class="switch" id="setStream" role="switch" aria-checked="true" aria-labelledby="setStreamLbl"></button></div>
+        <p class="set-hint">On: companies show up one by one while the AI works. Off: you wait a little longer, then see everything at once.</p>
+      </div>
+    </section>
+    <section class="set-sec"><h3>Research</h3>
+      <div class="set-item">
+        <div class="set-top"><span id="setDepthLbl">Search depth</span></div>
+        <div class="opt-grid" id="setDepth" role="radiogroup" aria-labelledby="setDepthLbl">
+          <button type="button" class="opt" role="radio" data-v="basic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><b>Fast</b><small>Quick scan of the web. Best for most searches.</small></button>
+          <button type="button" class="opt" role="radio" data-v="advanced"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg><b>Deep</b><small>Reads more sources and finds lesser-known rivals. Slower.</small></button>
+        </div>
+      </div>
+      <div class="set-item">
+        <div class="set-top"><span id="setPassesLbl">Extra research rounds</span></div>
+        <div class="seg6" id="setPasses" role="radiogroup" aria-labelledby="setPassesLbl">
+          <button type="button" role="radio" data-v="0">Off</button><button type="button" role="radio" data-v="1">1</button><button type="button" role="radio" data-v="2">2</button><button type="button" role="radio" data-v="3">3</button><button type="button" role="radio" data-v="4">4</button><button type="button" role="radio" data-v="5">5</button>
+        </div>
+        <p class="set-hint">After the first results, the app can spot missing details (like founding date or how a company is positioned) and search again to fill them in. Off is fastest. Each round adds detail and waiting time.</p>
+      </div>
+    </section>
+  </div>
+  <div class="set-foot"><button type="button" class="set-reset" id="setReset">Reset to defaults</button><button type="button" class="set-done" id="setDone">Done</button></div>
+</aside>
+
 <!-- ============ DOSSIER MODAL ============ -->
 <div class="overlay" id="overlay">
   <div class="backdrop" id="backdrop"></div>
@@ -433,6 +532,56 @@ const CONFIG = {
   if(q.get("depth")==="advanced" || q.get("depth")==="basic") CONFIG.SEARCH_DEPTH = q.get("depth");
   if(q.get("stream")==="0") CONFIG.STREAM = false;
   if(q.get("stream")==="1") CONFIG.STREAM = true;
+})();
+
+/* ---- user-facing search settings (URL params still win when present) ---- */
+(function(){
+  const KEY="cs_settings_v1", up=new URLSearchParams(location.search);
+  const DEF={max:12,depth:"basic",passes:0,stream:true};
+  let sv={}; try{ sv=JSON.parse(localStorage.getItem(KEY)||"{}")||{}; }catch(e){}
+  const num=(v,lo,hi,d)=>{ v=Math.round(Number(v)); return Number.isFinite(v)&&v>=lo&&v<=hi?v:d; };
+  const S={
+    max: up.has("max") ? CONFIG.MAX_COMPANIES : num(sv.max,3,25,DEF.max),
+    depth: up.has("depth") ? CONFIG.SEARCH_DEPTH : ((sv.depth==="advanced"||sv.depth==="basic") ? sv.depth : DEF.depth),
+    passes: up.has("passes") ? CONFIG.MAX_ENRICHMENT_PASSES : num(sv.passes,0,5,DEF.passes),
+    stream: up.has("stream") ? CONFIG.STREAM : (typeof sv.stream==="boolean" ? sv.stream : DEF.stream)
+  };
+  const $=id=>document.getElementById(id), drawer=$("setDrawer"), opener=$("setOpen");
+  function render(){
+    $("setMax").value=S.max; $("setMax").style.setProperty("--p",((S.max-3)/22*100)+"%"); $("setMaxVal").textContent=S.max;
+    document.querySelectorAll("#setDepth .opt").forEach(b=>b.setAttribute("aria-checked",String(b.dataset.v===S.depth)));
+    document.querySelectorAll("#setPasses button").forEach(b=>b.setAttribute("aria-checked",String(+b.dataset.v===S.passes)));
+    $("setStream").setAttribute("aria-checked",String(S.stream));
+    opener.classList.toggle("custom",Object.keys(DEF).some(k=>S[k]!==DEF[k]));
+  }
+  function change(){
+    CONFIG.MAX_COMPANIES=S.max; CONFIG.SEARCH_DEPTH=S.depth; CONFIG.MAX_ENRICHMENT_PASSES=S.passes; CONFIG.STREAM=S.stream;
+    render();
+    try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
+  }
+  function open(){ document.body.classList.add("set-open"); drawer.setAttribute("aria-hidden","false"); setTimeout(()=>$("setClose").focus(),60); }
+  function close(){ document.body.classList.remove("set-open"); drawer.setAttribute("aria-hidden","true"); opener.focus(); }
+  $("setMax").addEventListener("input",e=>{ S.max=+e.target.value; change(); });
+  document.querySelectorAll("#setDepth .opt").forEach(b=>b.addEventListener("click",()=>{ S.depth=b.dataset.v; change(); }));
+  document.querySelectorAll("#setPasses button").forEach(b=>b.addEventListener("click",()=>{ S.passes=+b.dataset.v; change(); }));
+  $("setStream").addEventListener("click",()=>{ S.stream=!S.stream; change(); });
+  $("setReset").addEventListener("click",()=>{ Object.assign(S,DEF); change(); });
+  opener.addEventListener("click",open);
+  $("setClose").addEventListener("click",close);
+  $("setDone").addEventListener("click",close);
+  $("setScrim").addEventListener("click",close);
+  document.addEventListener("keydown",e=>{
+    if(!document.body.classList.contains("set-open")) return;
+    if(e.key==="Escape"){ e.stopPropagation(); close(); return; }
+    if(e.key==="Tab"){
+      const f=[...drawer.querySelectorAll("button,input")].filter(x=>x.offsetParent!==null);
+      if(!f.length) return;
+      const a=f[0], z=f[f.length-1];
+      if(e.shiftKey && document.activeElement===a){ e.preventDefault(); z.focus(); }
+      else if(!e.shiftKey && document.activeElement===z){ e.preventDefault(); a.focus(); }
+    }
+  },true);
+  change();
 })();
 
 // Render's free tier sleeps after ~15 min idle. Ping on landing, then every 5 minutes
@@ -693,7 +842,6 @@ async function structureField(subjectLabel, searchData, onPartial){
    calls.
    ===================================================================== */
 let enrichWarnings = [];
-const MAX_ENRICHMENT_PASSES = CONFIG.MAX_ENRICHMENT_PASSES;
 const MAX_GAPS_PER_PASS = 6;
 const ENRICHABLE_FIELDS = ["tagline","positioning","signals","tags","confidence","founded","domain"];
 
@@ -722,14 +870,14 @@ async function reviseField(companies, gaps, searchData){
 async function enrichGaps(companies, sources, subjectLabel){
   let current = companies;
   enrichWarnings = [];
-  for(let pass = 0; pass < MAX_ENRICHMENT_PASSES; pass++){
+  for(let pass = 0; pass < CONFIG.MAX_ENRICHMENT_PASSES; pass++){
     let gapsResp;
     try{ gapsResp = await identifyGaps(current, subjectLabel); }
     catch(e){ console.error(e); enrichWarnings.push(`Pass ${pass+1}, finding gaps: ${errMsg(e)}`); break; }
     const gaps = (gapsResp.gaps || []).filter(g=>g && g.company && ENRICHABLE_FIELDS.includes(g.field)).slice(0, MAX_GAPS_PER_PASS);
     if(!gaps.length) break; // nothing worth chasing — done
 
-    setStatus(`Filling in ${gaps.length} gap${gaps.length>1?"s":""} (pass ${pass+1}/${MAX_ENRICHMENT_PASSES})…`);
+    setStatus(`Filling in ${gaps.length} gap${gaps.length>1?"s":""} (pass ${pass+1}/${CONFIG.MAX_ENRICHMENT_PASSES})…`);
 
     // The model writes its own query for whatever this batch needs, rather
     // than a query template hardcoded to one fact — falls back to a plain
