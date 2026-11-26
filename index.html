@@ -413,8 +413,27 @@ footer a:hover{color:var(--coral);text-decoration-color:var(--coral);}
    ===================================================================== */
 const CONFIG = {
   BACKEND_URL: "https://competitorsearch-backend.onrender.com",
-  LLM_MAX_OUTPUT_TOKENS: 4096
+  LLM_MAX_OUTPUT_TOKENS: 4096,
+
+  // ---- Tunables (all of these can also be overridden from the URL, see below) ----
+  MAX_ENRICHMENT_PASSES: 0,   // gap-filling passes after the first structuring step. 0 = fastest. ?passes=0..5
+  MAX_COMPANIES: 12,          // how many companies the AI lists. Fewer = faster.      ?max=3..25
+  SEARCH_DEPTH: "basic",      // "basic" = fast, "advanced" = slower but deeper.      ?depth=advanced
+  CACHE_HOURS: 24,            // backend remembers identical searches this long. 0 = off. ?cache=0..168
+  STREAM: true                // show companies as the AI writes them.                 ?stream=0
 };
+// Example: competitorsearch.vercel.app/?passes=1&max=18&depth=advanced&cache=0&stream=0
+(function(){
+  const q = new URLSearchParams(location.search);
+  const num = (k,lo,hi)=>{ const v = parseFloat(q.get(k)); return Number.isFinite(v) && v>=lo && v<=hi ? v : null; };
+  let v;
+  if((v=num("passes",0,5))!==null) CONFIG.MAX_ENRICHMENT_PASSES = Math.round(v);
+  if((v=num("max",3,25))!==null)   CONFIG.MAX_COMPANIES = Math.round(v);
+  if((v=num("cache",0,168))!==null) CONFIG.CACHE_HOURS = v;
+  if(q.get("depth")==="advanced" || q.get("depth")==="basic") CONFIG.SEARCH_DEPTH = q.get("depth");
+  if(q.get("stream")==="0") CONFIG.STREAM = false;
+  if(q.get("stream")==="1") CONFIG.STREAM = true;
+})();
 
 // Render's free tier sleeps after ~15 min idle. Ping on landing, then every 5 minutes
 // for as long as this page stays open, so the backend stays awake.
@@ -536,7 +555,7 @@ async function callLLM(system, user){
       res = await fetch(CONFIG.BACKEND_URL + "/api/llm", {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ system, user, max_tokens: CONFIG.LLM_MAX_OUTPUT_TOKENS, temperature: 0.2 })
+        body: JSON.stringify({ system, user, max_tokens: CONFIG.LLM_MAX_OUTPUT_TOKENS, temperature: 0.2, cache_ttl_hours: CONFIG.CACHE_HOURS })
       });
     }catch(e){ const err=new Error(`Couldn't reach the backend (${errMsg(e)}) — it may be waking up, or there's a network issue.`); err.retriable=true; throw err; }
     if(!res.ok) throw await httpError("AI", res);
@@ -563,7 +582,7 @@ async function tavilySearch(query, maxResults=20){
     try{
       res = await fetch(CONFIG.BACKEND_URL + "/api/search", {
         method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ query, max_results: Math.min(20, maxResults) })
+        body: JSON.stringify({ query, max_results: Math.min(20, maxResults), search_depth: CONFIG.SEARCH_DEPTH, cache_ttl_hours: CONFIG.CACHE_HOURS })
       });
     }catch(e){ const err=new Error(`Couldn't reach the backend (${errMsg(e)}) — it may be waking up, or there's a network issue.`); err.retriable=true; throw err; }
     if(!res.ok) throw await httpError("Search", res);
@@ -572,10 +591,70 @@ async function tavilySearch(query, maxResults=20){
   });
 }
 
+// ---- Streaming: show companies as the AI writes them ----
+// Pulls every COMPLETE company object out of partially-streamed JSON.
+function extractCompanies(text){
+  const k = text.indexOf('"companies"');
+  if(k < 0) return [];
+  let i = text.indexOf('[', k);
+  if(i < 0) return [];
+  const out = [];
+  let depth = 0, inStr = false, esc = false, start = -1;
+  for(i = i + 1; i < text.length; i++){
+    const ch = text[i];
+    if(inStr){ if(esc) esc = false; else if(ch === "\\") esc = true; else if(ch === '"') inStr = false; continue; }
+    if(ch === '"'){ inStr = true; continue; }
+    if(ch === "{"){ if(depth === 0) start = i; depth++; }
+    else if(ch === "}"){
+      depth--;
+      if(depth === 0 && start >= 0){ try{ out.push(JSON.parse(text.slice(start, i+1))); }catch(e){} start = -1; }
+    }
+    else if(ch === "]" && depth === 0) break;
+  }
+  return out;
+}
+
+async function callLLMStream(system, user, onText){
+  let res;
+  try{
+    res = await fetch(CONFIG.BACKEND_URL + "/api/llm/stream", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ system, user, max_tokens: CONFIG.LLM_MAX_OUTPUT_TOKENS, temperature: 0.2, cache_ttl_hours: CONFIG.CACHE_HOURS })
+    });
+  }catch(e){ throw new Error(`Couldn't reach the backend (${errMsg(e)})`); }
+  if(!res.ok) throw await httpError("AI", res);
+  if(!res.body || !res.body.getReader) throw new Error("Streaming isn't supported in this browser");
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let text = "";
+  while(true){
+    const {done, value} = await reader.read();
+    if(done) break;
+    text += dec.decode(value, {stream:true});
+    try{ onText && onText(text); }catch(e){ console.error(e); }
+  }
+  text += dec.decode();
+  if(!text.trim()) throw new Error("AI stream came back empty");
+  try{ return JSON.parse(text); }
+  catch(e1){
+    try{ return JSON.parse(text.replace(/```json|```/g,"").trim()); }
+    catch(e2){ throw new Error(`AI reply wasn't valid JSON (${errMsg(e2)}). Starts with: ${text.slice(0,200)}`); }
+  }
+}
+
 // ---- Stage 1: the AI parses natural language into a real search intent ----
 async function parseIntent(raw){
-  const sys = `You turn a casual, natural-language request about competitors into a precise web search query. Respond ONLY with strict JSON: {"refined_query":"...","subject_label":"short human label, e.g. 'Expense management competitors to Ramp'"}. Keep refined_query concrete and searchable — include real product/company names if the user gave any.`;
-  return callLLM(sys, raw);
+  const sys = `You turn a casual, natural-language request about competitors into ONE detailed web search query that a search engine will answer in a single pass, so the results leave no gaps. Respond ONLY with strict JSON: {"refined_query":"...","subject_label":"short human label, e.g. 'Expense management competitors to Ramp'"}.
+Rules for refined_query:
+- Name the exact product category and the user's own company/product if given, plus close synonyms (e.g. "AI memory layer", "persistent memory for LLM agents").
+- Aim at pages that list many companies at once: "top", "best", "alternatives to", "competitors of", "comparison", "market map".
+- Ask for the facts the results must contain for EACH company: official website, year founded, headquarters, what the product does, target customers, pricing or funding stage.
+- Include real company names the user mentioned, and well-known players in that space you are confident exist.
+- One flowing query, plain text, no quotes or operators, under 350 characters.`;
+  const r = await callLLM(sys, raw);
+  if(r && r.refined_query) r.refined_query = String(r.refined_query).slice(0, 390);
+  return r;
 }
 
 // ---- Refine: re-filter/re-rank the EXISTING field against a free-text ask, no new web search ----
@@ -586,10 +665,15 @@ async function refineField(subjectLabel, refinementText, companies){
 }
 
 // ---- Stage 3: the AI structures search results into the field of companies ----
-async function structureField(subjectLabel, searchData){
+async function structureField(subjectLabel, searchData, onPartial){
   const sys = `You structure raw web search results into a short, honest field of real, named competitors. Never invent a company, domain, or fact not supported by the given context. If evidence is thin, return fewer companies rather than padding, and say so in "note". For "founded", only give a value if the context supports it (format "YYYY-MM" if month is known, else just "YYYY"); if not found, use an empty string — never guess. For "similarity", grade 0-100: how closely this company actually matches what the user is looking for (the subject: "${subjectLabel}"), not how confident you are in the facts. Reason about each company independently and land on the single specific number that reflects your real judgment of fit — do not round to a multiple of 5 or 10, and do not reuse the same number across companies unless two are genuinely, precisely equally good a match. Treat this as a continuous, precise measurement, not a bucket like "high/medium/low" translated into a number. Two companies that differ even slightly in fit should get different scores (e.g. 78 vs 82, not both 80). Prioritize accuracy over tidiness. Respond ONLY with strict JSON:
 {"companies":[{"name":"...","domain":"example.com","tagline":"one plain sentence, what they do","positioning":"1-2 sentences on how they differentiate in this field","signals":["short factual bullet","short factual bullet","short factual bullet"],"tags":["category tag","stage or size tag"],"confidence":"verified"|"estimate"|"unclear","founded":"YYYY-MM or YYYY or empty string","similarity":0}],"note":"one sentence caveat if evidence was thin, else empty string"}`;
-  const user = `Subject: ${subjectLabel}\n\nSearch context:\n${JSON.stringify(searchData).slice(0,16000)}\n\nList up to 18 real, named companies found in the context.`;
+  const user = `Subject: ${subjectLabel}\n\nSearch context:\n${JSON.stringify(searchData).slice(0,16000)}\n\nList up to ${CONFIG.MAX_COMPANIES} real, named companies found in the context.`;
+  if(CONFIG.STREAM && onPartial){
+    try{
+      return await callLLMStream(sys, user, text=>{ const c = extractCompanies(text); if(c.length) onPartial(c); });
+    }catch(e){ console.error("Streaming failed, falling back to normal request:", e); }
+  }
   return callLLM(sys, user);
 }
 
@@ -609,7 +693,7 @@ async function structureField(subjectLabel, searchData){
    calls.
    ===================================================================== */
 let enrichWarnings = [];
-const MAX_ENRICHMENT_PASSES = 5;
+const MAX_ENRICHMENT_PASSES = CONFIG.MAX_ENRICHMENT_PASSES;
 const MAX_GAPS_PER_PASS = 6;
 const ENRICHABLE_FIELDS = ["tagline","positioning","signals","tags","confidence","founded","domain"];
 
@@ -789,6 +873,19 @@ function renderField(subjectLabel, parsed, sources){
   currentCompanies.forEach((c,i)=> field.appendChild(renderCard(c,i)));
 }
 
+function renderPartial(subjectLabel, companies){
+  if(!companies.length) return;
+  if(resultsSection.classList.contains("loading")){
+    field.innerHTML = "";
+    resultsSection.classList.remove("loading");
+    understoodAs.textContent = subjectLabel;
+  }
+  currentCompanies = companies;
+  currentSubjectLabel = subjectLabel || "";
+  for(let i = field.children.length; i < companies.length; i++) field.appendChild(renderCard(companies[i], i));
+  countText.textContent = `${companies.length} found…`;
+}
+
 function renderSkeleton(){
   field.innerHTML = "";
   understoodAs.textContent = "Searching…";
@@ -854,7 +951,7 @@ async function runSearch(){
     const searchData = await tavilySearch(intent.refined_query || raw);
     stage = "structuring results (Gemini)";
     setStatus("Structuring the field…");
-    const parsed = await structureField(intent.subject_label || raw, searchData);
+    const parsed = await structureField(intent.subject_label || raw, searchData, c=>renderPartial(intent.subject_label || raw, c));
     const sources = (searchData.results || []).map(r=>r.url).filter(Boolean);
     stage = "filling gaps";
     parsed.companies = await enrichGaps(parsed.companies || [], sources, intent.subject_label || raw);
