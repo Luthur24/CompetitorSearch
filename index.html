@@ -515,9 +515,9 @@ const CONFIG = {
   LLM_MAX_OUTPUT_TOKENS: 4096,
 
   // ---- Tunables (all of these can also be overridden from the URL, see below) ----
-  MAX_ENRICHMENT_PASSES: 0,   // gap-filling passes after the first structuring step. 0 = fastest. ?passes=0..5
-  MAX_COMPANIES: 12,          // how many companies the AI lists. Fewer = faster.      ?max=3..25
-  SEARCH_DEPTH: "basic",      // "basic" = fast, "advanced" = slower but deeper.      ?depth=advanced
+  MAX_ENRICHMENT_PASSES: 2,   // gap-filling passes after the first structuring step. 0 = fastest. ?passes=0..5
+  MAX_COMPANIES: 10,          // how many companies the AI lists. Fewer = faster.      ?max=3..25
+  SEARCH_DEPTH: "advanced",   // "basic" = fast, "advanced" = slower but deeper.      ?depth=advanced
   CACHE_HOURS: 24,            // backend remembers identical searches this long. 0 = off. ?cache=0..168
   STREAM: true                // show companies as the AI writes them.                 ?stream=0
 };
@@ -537,7 +537,7 @@ const CONFIG = {
 /* ---- user-facing search settings (URL params still win when present) ---- */
 (function(){
   const KEY="cs_settings_v1", up=new URLSearchParams(location.search);
-  const DEF={max:12,depth:"basic",passes:0,stream:true};
+  const DEF={max:10,depth:"advanced",passes:2,stream:true};
   let sv={}; try{ sv=JSON.parse(localStorage.getItem(KEY)||"{}")||{}; }catch(e){}
   const num=(v,lo,hi,d)=>{ v=Math.round(Number(v)); return Number.isFinite(v)&&v>=lo&&v<=hi?v:d; };
   const S={
@@ -697,14 +697,31 @@ async function withRetry(fn, retries=1, delay=1200){
   }
 }
 
-async function callLLM(system, user){
+// Tolerant JSON reader for model replies: handles code fences, trailing commas and // comments,
+// and as a last resort keeps every company object that did arrive intact.
+function parseModelJson(text){
+  const t = String(text||"").replace(/```json|```/g,"").trim();
+  let first = null;
+  const fixes = [t, t.replace(/,\s*([}\]])/g,"$1"), t.replace(/^\s*\/\/.*$/gm,"").replace(/,\s*([}\]])/g,"$1")];
+  for(const f of fixes){
+    try{ return JSON.parse(f); }catch(e){ if(!first) first = e; }
+  }
+  const companies = extractCompanies(t);
+  if(companies.length){
+    const n = /"note"\s*:\s*"([^"]*)"/.exec(t);
+    return { companies, note: (n && n[1]) || "Part of the AI reply was malformed, so this list may be incomplete." };
+  }
+  throw first;
+}
+
+async function callLLM(system, user, noCache){
   return withRetry(async ()=>{
     let res;
     try{
       res = await fetch(CONFIG.BACKEND_URL + "/api/llm", {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ system, user, max_tokens: CONFIG.LLM_MAX_OUTPUT_TOKENS, temperature: 0.2, cache_ttl_hours: CONFIG.CACHE_HOURS })
+        body: JSON.stringify({ system, user, max_tokens: CONFIG.LLM_MAX_OUTPUT_TOKENS, temperature: 0.2, cache_ttl_hours: noCache ? 0 : CONFIG.CACHE_HOURS })
       });
     }catch(e){ const err=new Error(`Couldn't reach the backend (${errMsg(e)}) — it may be waking up, or there's a network issue.`); err.retriable=true; throw err; }
     if(!res.ok) throw await httpError("AI", res);
@@ -714,13 +731,12 @@ async function callLLM(system, user){
     const raw = data?.content;
     if(!raw) throw new Error(`AI returned no content. Full response: ${JSON.stringify(data).slice(0,400)}`);
     const finish = data?.finish_reason;
-    try{ return JSON.parse(raw); }
-    catch(e1){
-      try{ return JSON.parse(raw.replace(/```json|```/g,"").trim()); }
-      catch(e2){
-        const cut = finish==="length" ? " Output was cut off at the token limit." : "";
-        throw new Error(`AI reply wasn't valid JSON (${errMsg(e2)}).${cut} Starts with: ${raw.slice(0,200)}`);
-      }
+    try{ return parseModelJson(raw); }
+    catch(e2){
+      // A bad reply can be remembered by the backend's cache, so ask once more, fresh.
+      if(!noCache && CONFIG.CACHE_HOURS > 0) return callLLM(system, user, true);
+      const cut = finish==="length" ? " Output was cut off at the token limit." : "";
+      throw new Error(`AI reply wasn't valid JSON (${errMsg(e2)}).${cut} Starts with: ${raw.slice(0,200)}`);
     }
   });
 }
@@ -785,11 +801,8 @@ async function callLLMStream(system, user, onText){
   }
   text += dec.decode();
   if(!text.trim()) throw new Error("AI stream came back empty");
-  try{ return JSON.parse(text); }
-  catch(e1){
-    try{ return JSON.parse(text.replace(/```json|```/g,"").trim()); }
-    catch(e2){ throw new Error(`AI reply wasn't valid JSON (${errMsg(e2)}). Starts with: ${text.slice(0,200)}`); }
-  }
+  try{ return parseModelJson(text); }
+  catch(e2){ throw new Error(`AI reply wasn't valid JSON (${errMsg(e2)}). Starts with: ${text.slice(0,200)}`); }
 }
 
 // ---- Stage 1: the AI parses natural language into a real search intent ----
