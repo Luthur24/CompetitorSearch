@@ -370,6 +370,31 @@ body.set-open .set-drawer{transform:none;visibility:visible;}
   .set-head{padding-top:14px;}
 }
 @media(prefers-reduced-motion:reduce){.set-drawer,.set-scrim,.switch,.switch::after{transition:none;}}
+
+/* ---------- verified facts (Exa) — added, nothing above changed ---------- */
+.card-vitals{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:8px 0 2px;font-family:var(--mono);font-size:11px;color:var(--dim);}
+.vbadge{display:inline-flex;align-items:center;gap:4px;color:var(--emerald);border:1px solid var(--emerald);border-radius:6px;padding:2px 6px;font-size:10px;letter-spacing:.04em;text-transform:uppercase;}
+.fx-sub{font-size:12px;color:var(--faint);margin:-2px 0 12px;}
+.fx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}
+.fx-tile{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 11px;min-width:0;}
+.fx-tile .k{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin-bottom:3px;}
+.fx-tile .v{font-size:14px;color:var(--text);overflow-wrap:anywhere;}
+.fx-ev{margin:0 0 10px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;}
+.fx-ev a.t{color:var(--text);font-size:13.5px;font-weight:600;text-decoration:none;overflow-wrap:anywhere;}
+.fx-ev a.t:hover{color:var(--coral);}
+.fx-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;font-family:var(--mono);font-size:10.5px;color:var(--faint);}
+.fx-grade{border:1px solid var(--border);border-radius:5px;padding:1px 5px;}
+.fx-grade.A{color:var(--emerald);border-color:var(--emerald);}
+.fx-ev q{display:block;margin-top:6px;font-size:12.5px;line-height:1.55;color:var(--dim);quotes:none;border-left:2px solid var(--border);padding-left:9px;}
+.fx-note{font-size:12.5px;color:var(--faint);}
+.fx-btn{background:var(--coral);color:#1a0d08;border:none;border-radius:10px;padding:10px 16px;font-weight:700;font-size:13px;cursor:pointer;}
+.fx-btn:disabled{opacity:.5;cursor:not-allowed;}
+.bc{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:10px;}
+.bc h4{margin:14px 0 6px;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);font-weight:500;}
+.bc h4:first-child{margin-top:0;}
+.bc ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--text);line-height:1.65;}
+.bc .obj{margin:0 0 8px;font-size:13.5px;line-height:1.55;}
+.bc .obj b{color:var(--coral);font-weight:600;}
 </style>
 </head>
 <body>
@@ -533,7 +558,10 @@ const CONFIG = {
   GAPS_PER_PASS: 6,           // weak fields chased per enrichment round.              ?gaps=2..10
   INTEL: true,                // research the extra competitor-tracking fields.        ?intel=0
   CACHE_HOURS: 24,            // backend remembers identical searches this long. 0 = off. ?cache=0..168
-  STREAM: true                // show companies as the AI writes them.                 ?stream=0
+  STREAM: true,                // show companies as the AI writes them.                 ?stream=0
+  FACTS: true,               // add sourced facts from Exa on cards + dossier.         ?facts=0
+  FACTS_CONCURRENCY: 4,       // companies looked up in parallel (keeps Exa happy).
+  FACTS_RESULTS: 4            // sources kept per topic in the dossier.
 };
 // Example: competitorsearch.vercel.app/?passes=1&max=18&depth=advanced&cache=0&stream=0
 (function(){
@@ -549,6 +577,8 @@ const CONFIG = {
   if(q.get("stream")==="1") CONFIG.STREAM = true;
   if(q.get("intel")==="0") CONFIG.INTEL = false;
   if(q.get("intel")==="1") CONFIG.INTEL = true;
+  if(q.get("facts")==="0") CONFIG.FACTS = false;
+  if(q.get("facts")==="1") CONFIG.FACTS = true;
 })();
 
 /* ---- user-facing search settings (URL params still win when present) ---- */
@@ -997,6 +1027,241 @@ function intelSections(c){
   return html;
 }
 
+/* =====================================================================
+   VERIFIED FACTS (Exa) — added on top of the existing pipeline.
+   Nothing here replaces what Gemini/Tavily produced: Exa facts only fill
+   fields that came back empty, and everything else is shown in its own
+   "Verified facts" section with a source link and a source grade
+   (A = the company's own site, B = press / review sites).
+   Modelled on a competitor profile in tools like Klue: vitals, funding,
+   pricing, news, hiring signals, leadership, customers, product, reviews,
+   plus a battlecard built ONLY from the evidence gathered.
+   ===================================================================== */
+const FX = new Map();          // company key -> { vitals, deep, deepErr, battlecard, ... }
+let fxOpenKey = null;
+let fxNoticeShown = false;
+const FX_TOPIC_LABELS = {
+  funding:"Funding & investors", pricing:"Pricing (from their own site)", news:"Recent news",
+  hiring:"Hiring signals (growth proxy)", leadership:"Leadership", customers:"Customers & case studies",
+  product:"Product & integrations", reviews:"Customer reviews"
+};
+const FX_DEEP_TOPICS = Object.keys(FX_TOPIC_LABELS);
+
+const fxKey = c => ((c.domain||"").toLowerCase().replace(/^https?:\/\//,"").replace(/^www\./,"").split("/")[0]) || (c.name||"").toLowerCase();
+const fxEsc = s => String(s==null?"":s).replace(/[&<>"']/g, ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+const fxHost = u => { try{ return new URL(u).hostname.replace(/^www\./,""); }catch(e){ return ""; } };
+const fxNum = n => Number.isFinite(+n) ? (+n).toLocaleString("en-US") : fxEsc(n);
+const fxPretty = k => String(k).replace(/([a-z])([A-Z])/g,"$1 $2").replace(/[_-]+/g," ").replace(/^./,m=>m.toUpperCase());
+const fxSafeUrl = u => /^https?:\/\//i.test(u||"") ? fxEsc(u) : "#";
+function fxShort(s, n){ s = String(s||"").replace(/\s+/g," ").trim(); return s.length>n ? s.slice(0,n-1)+"…" : s; }
+
+// Flatten Exa's nested company properties into label/value tiles (schema-agnostic).
+function fxFlatten(obj, prefix, out, depth){
+  if(!obj || typeof obj!=="object" || out.length>=24) return out;
+  for(const [k,v] of Object.entries(obj)){
+    if(v==null || v==="" || (Array.isArray(v) && !v.length)) continue;
+    const label = prefix ? `${prefix} · ${fxPretty(k)}` : fxPretty(k);
+    if(Array.isArray(v)){
+      if(v.every(x=>typeof x!=="object")) out.push([label, v.slice(0,6).join(", ")]);
+    }else if(typeof v==="object"){
+      if(depth<2) fxFlatten(v, label, out, depth+1);
+    }else{
+      out.push([label, typeof v==="number" ? v.toLocaleString("en-US") : String(v)]);
+    }
+  }
+  return out;
+}
+
+async function fxCall(c, topics){
+  const body = JSON.stringify({ name:c.name, domain:c.domain||"", topics, max_results:CONFIG.FACTS_RESULTS, cache_ttl_hours:CONFIG.CACHE_HOURS });
+  let last;
+  for(let attempt=0; attempt<2; attempt++){
+    let res;
+    try{ res = await fetch(CONFIG.BACKEND_URL + "/api/facts", { method:"POST", headers:{ "Content-Type":"application/json" }, body }); }
+    catch(e){ last = new Error(`Couldn't reach the backend (${errMsg(e)})`); await new Promise(r=>setTimeout(r,1200)); continue; }
+    if(res.ok) return res.json();
+    last = await httpError("Facts", res);
+    if(!last.retriable) break;
+    await new Promise(r=>setTimeout(r,1500));
+  }
+  throw last;
+}
+function fxNotice(e){
+  if(fxNoticeShown) return;
+  const st = e && e.status;
+  if(st===401 || st===402 || st===403 || st===429){
+    fxNoticeShown = true;
+    showErr("Verified facts are unavailable right now (" + errMsg(e) + "). The normal results are unaffected.");
+  }
+}
+
+// Additive: only fills fields that are still empty after the AI pass.
+function fxFillEmpty(c, rec){
+  const v = rec && rec.vitals; if(!v) return;
+  rec.filled = rec.filled || [];
+  const fill = (field, val)=>{ if(!c[field] && val){ c[field] = val; if(!rec.filled.includes(field)) rec.filled.push(field); } };
+  fill("founded", v.founded ? String(v.founded) : "");
+  fill("team_size", v.headcount ? `~${fxNum(v.headcount)} employees` : "");
+  fill("geography", v.hq);
+  fill("domain", v.source_url ? fxHost(v.source_url) : "");
+}
+
+function vitalsLine(c){
+  const rec = FX.get(fxKey(c)); const v = rec && rec.vitals;
+  if(!v) return "";
+  const bits = [];
+  if(v.hq) bits.push(fxEsc(v.hq));
+  if(v.headcount) bits.push(fxNum(v.headcount) + " staff");
+  if(v.founded) bits.push("est. " + fxEsc(v.founded));
+  if(!bits.length) return "";
+  return `<div class="card-vitals"><span class="vbadge" title="Sourced live via Exa">✓ verified</span><span>${bits.join(" · ")}</span></div>`;
+}
+function fxRefreshCard(c){
+  const k = fxKey(c);
+  const idx = currentCompanies.findIndex(x=>fxKey(x)===k);
+  if(idx<0 || !field.children[idx]) return;
+  field.replaceChild(renderCard(currentCompanies[idx], idx), field.children[idx]);
+}
+
+async function loadVitals(){
+  const list = currentCompanies.slice();
+  let i = 0;
+  const worker = async ()=>{
+    while(i < list.length){
+      const c = list[i++]; const k = fxKey(c);
+      let rec = FX.get(k); if(!rec){ rec = {}; FX.set(k, rec); }
+      if(!rec.vitals && !rec.vitalsTried){
+        rec.vitalsTried = true;
+        try{
+          const d = await fxCall(c, ["profile"]);
+          rec.vitals = d.profile || null; rec.retrievedAt = d.retrieved_at;
+        }catch(e){ console.warn("Facts (profile) failed for", c.name, e); rec.vitalsErr = errMsg(e); fxNotice(e); }
+      }
+      fxFillEmpty(c, rec);
+      fxRefreshCard(c);
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(CONFIG.FACTS_CONCURRENCY, list.length)}, worker));
+}
+
+async function loadDeepFacts(idx){
+  const c = currentCompanies[idx]; if(!c) return;
+  const k = fxKey(c);
+  let rec = FX.get(k); if(!rec){ rec = {}; FX.set(k, rec); }
+  if(rec.deep || rec.deepLoading){ fxPaint(c); return; }
+  rec.deepLoading = true; fxPaint(c);
+  try{
+    const topics = rec.vitals ? FX_DEEP_TOPICS : ["profile"].concat(FX_DEEP_TOPICS);
+    const d = await fxCall(c, topics);
+    if(d.profile && !rec.vitals) rec.vitals = d.profile;
+    rec.deep = d.evidence || {}; rec.deepErrors = d.errors || {}; rec.retrievedAt = d.retrieved_at;
+    fxFillEmpty(c, rec);
+  }catch(e){
+    console.warn("Facts (dossier) failed for", c.name, e); rec.deepErr = errMsg(e); fxNotice(e);
+  }finally{
+    rec.deepLoading = false;
+    fxPaint(c); fxRefreshCard(c);
+  }
+}
+
+function fxPaint(c){
+  const box = document.getElementById("vfx");
+  if(!box || fxOpenKey !== fxKey(c)) return;
+  box.innerHTML = verifiedHtml(c);
+  const b = document.getElementById("bcBtn");
+  if(b) b.addEventListener("click", ()=>buildBattlecard(c));
+}
+
+function fxEvidenceBlock(topic, items){
+  if(!items || !items.length) return "";
+  const rows = items.map(it=>{
+    const host = fxEsc(fxHost(it.url));
+    const date = it.published ? String(it.published).slice(0,10) : "";
+    const quotes = (it.highlights||[]).slice(0,2).map(h=>`<q>${fxEsc(fxShort(h, 240))}</q>`).join("");
+    return `<div class="fx-ev"><a class="t" href="${fxSafeUrl(it.url)}" target="_blank" rel="noopener">${fxEsc(fxShort(it.title||host, 110))}</a>
+      <div class="fx-meta"><span class="fx-grade ${fxEsc(it.grade)}" title="${fxEsc(it.source_type)}">${fxEsc(it.grade)}</span><span>${host}</span>${date?`<span>${fxEsc(date)}</span>`:""}</div>${quotes}</div>`;
+  }).join("");
+  return `<div class="dossier-section"><div class="label">${fxEsc(FX_TOPIC_LABELS[topic]||topic)}</div>${rows}</div>`;
+}
+
+function verifiedHtml(c){
+  const rec = FX.get(fxKey(c)) || {};
+  const v = rec.vitals;
+  let html = `<div class="dossier-section"><div class="label">Verified facts</div>
+    <p class="fx-sub">Pulled live from the web via Exa. Each item links to its source — grade A is the company's own site, B is press or review sites. Anything not found is left out, not guessed.</p>`;
+  if(v){
+    const tiles = [];
+    if(v.hq) tiles.push(["Headquarters", v.hq]);
+    if(v.headcount) tiles.push(["Headcount", fxNum(v.headcount)]);
+    if(v.founded) tiles.push(["Founded", v.founded]);
+    const shown = new Set(["name","description","foundedYear","workforce","headquarters"]);
+    const extra = {}; Object.entries(v.properties||{}).forEach(([k,val])=>{ if(!shown.has(k)) extra[k]=val; });
+    fxFlatten(extra, "", [], 0).forEach(t=>tiles.push(t));
+    if(tiles.length){
+      html += `<div class="fx-grid">${tiles.slice(0,18).map(([k,val])=>`<div class="fx-tile"><div class="k">${fxEsc(k)}</div><div class="v">${fxEsc(fxShort(val,80))}</div></div>`).join("")}</div>`;
+      if(v.source_url) html += `<div class="fx-meta" style="margin-top:8px"><span class="fx-grade B">B</span><a class="source-link" href="${fxSafeUrl(v.source_url)}" target="_blank" rel="noopener">${fxEsc(fxHost(v.source_url))}</a><span>company profile</span></div>`;
+    }else html += `<p class="fx-note">No structured company profile found.</p>`;
+    if(rec.filled && rec.filled.length) html += `<p class="fx-note" style="margin-top:8px">Filled from Exa because the AI pass left them empty: ${rec.filled.map(fxEsc).join(", ")}.</p>`;
+  }else if(rec.vitalsErr){
+    html += `<p class="fx-note">Couldn't load verified facts: ${fxEsc(fxShort(rec.vitalsErr,160))}</p>`;
+  }else if(!rec.deepLoading){
+    html += `<p class="fx-note">No verified profile found for this company.</p>`;
+  }
+  html += `</div>`;
+  if(rec.deepLoading){
+    html += `<div class="dossier-section"><p class="fx-note">Gathering funding, pricing, news, hiring, leadership, customers, product and reviews…</p></div>`;
+  }else if(rec.deepErr){
+    html += `<div class="dossier-section"><p class="fx-note">Couldn't load the deeper research: ${fxEsc(fxShort(rec.deepErr,200))}</p></div>`;
+  }else if(rec.deep){
+    FX_DEEP_TOPICS.forEach(t=>{ html += fxEvidenceBlock(t, rec.deep[t]); });
+    const got = FX_DEEP_TOPICS.filter(t=>(rec.deep[t]||[]).length);
+    if(!got.length) html += `<div class="dossier-section"><p class="fx-note">No sourced evidence found for this company.</p></div>`;
+    const failed = Object.keys(rec.deepErrors||{});
+    if(failed.length) html += `<div class="dossier-section"><p class="fx-note">Couldn't fetch: ${failed.map(f=>fxEsc(FX_TOPIC_LABELS[f]||f)).join(", ")}.</p></div>`;
+    if(got.length){
+      html += `<div class="dossier-section"><div class="label">Battlecard</div>`;
+      if(rec.bcLoading) html += `<p class="fx-note">Building the battlecard from the evidence above…</p>`;
+      else if(rec.bcErr) html += `<p class="fx-note">Couldn't build it: ${fxEsc(fxShort(rec.bcErr,200))}</p><button class="fx-btn" id="bcBtn" type="button">Try again</button>`;
+      else if(rec.battlecard) html += bcHtml(rec.battlecard);
+      else html += `<p class="fx-note" style="margin-bottom:10px">A short sales/strategy brief written only from the sourced evidence above — no outside claims.</p><button class="fx-btn" id="bcBtn" type="button">Build battlecard</button>`;
+      html += `</div>`;
+    }
+    if(rec.retrievedAt) html += `<p class="fx-note">Evidence retrieved ${fxEsc(String(rec.retrievedAt).slice(0,16).replace("T"," "))} UTC. Verify anything decision-critical at the linked source.</p>`;
+  }
+  return html;
+}
+
+function bcHtml(b){
+  const list = (arr)=> (Array.isArray(arr)&&arr.length) ? `<ul>${arr.map(x=>`<li>${fxEsc(x)}</li>`).join("")}</ul>` : "";
+  const objs = (Array.isArray(b.objections)?b.objections:[]).map(o=>`<p class="obj"><b>They say:</b> ${fxEsc(o.they_say)}<br><b>You say:</b> ${fxEsc(o.you_say)}</p>`).join("");
+  return `<div class="bc">
+    ${b.summary?`<h4>Summary</h4><p class="obj">${fxEsc(b.summary)}</p>`:""}
+    ${(b.how_to_win||[]).length?`<h4>How to win against them</h4>${list(b.how_to_win)}`:""}
+    ${(b.watch_outs||[]).length?`<h4>Watch out for</h4>${list(b.watch_outs)}`:""}
+    ${objs?`<h4>Objection handling</h4>${objs}`:""}
+    ${(b.questions_to_ask||[]).length?`<h4>Questions that expose their weak spots</h4>${list(b.questions_to_ask)}`:""}
+    ${(b.gaps||[]).length?`<h4>Could not verify</h4>${list(b.gaps)}`:""}
+  </div>`;
+}
+
+async function buildBattlecard(c){
+  const rec = FX.get(fxKey(c)); if(!rec || !rec.deep || rec.bcLoading) return;
+  rec.bcLoading = true; rec.bcErr = ""; fxPaint(c);
+  try{
+    const ev = {};
+    FX_DEEP_TOPICS.forEach(t=>{
+      const items = (rec.deep[t]||[]).slice(0,3).map(it=>({ source:fxHost(it.url), grade:it.grade, date:(it.published||"").slice(0,10), title:fxShort(it.title,120), text:fxShort((it.highlights||[]).join(" "),520) }));
+      if(items.length) ev[t] = items;
+    });
+    const v = rec.vitals || {};
+    const vit = { hq:v.hq, headcount:v.headcount, founded:v.founded, description:fxShort(v.description,300) };
+    const system = `You write a competitor battlecard about ONE company using ONLY the evidence supplied. Never invent facts, numbers, prices, customers or quotes. If the evidence does not support a point, leave it out and list it under "gaps" instead. Mention a source by its host name in square brackets when you use it, e.g. [techcrunch.com]. Be concrete and short. Reply with ONE JSON object and nothing else, shaped exactly like: {"summary":"2 sentences on who they are and where they are strong","how_to_win":["..."],"watch_outs":["..."],"objections":[{"they_say":"...","you_say":"..."}],"questions_to_ask":["discovery questions that expose this competitor's weak spots"],"gaps":["what the evidence could not confirm"]}`;
+    const user = `Competitor: ${c.name}\nField we compete in: ${currentSubjectLabel||currentRawQuery||""}\nVitals: ${JSON.stringify(vit)}\nEvidence by topic: ${JSON.stringify(ev)}`;
+    rec.battlecard = await callLLM(system, user);
+  }catch(e){ console.warn("Battlecard failed:", e); rec.bcErr = errMsg(e); }
+  finally{ rec.bcLoading = false; fxPaint(c); }
+}
+
 function renderCard(c, idx){
   const card = document.createElement("div");
   card.className = "card";
@@ -1010,6 +1275,7 @@ function renderCard(c, idx){
       </button>
     </div>
     <p class="tagline">${c.tagline || ""}</p>
+    ${vitalsLine(c)}
     <div class="tags">
       ${(c.tags||[]).map(t=>`<span class="tag-chip">${t}</span>`).join("")}
       <span class="tag-chip conf-${c.confidence||'unclear'}">${(c.confidence||"unclear")}</span>
@@ -1076,10 +1342,13 @@ function openDossier(idx){
       <p>${formatFounded(c.founded)}</p>
     </div>
     ${intelSections(c)}
+    <div id="vfx">${CONFIG.FACTS ? verifiedHtml(c) : ""}</div>
     <div class="dossier-sources">Sources: ${currentSources.slice(0,5).map(u=>{try{const host=new URL(u).hostname; return `<a href="${u}" target="_blank" rel="noopener" class="source-link"><img class="source-favicon" src="https://www.google.com/s2/favicons?sz=64&domain=${host}" alt="" onerror="this.remove()">${host}</a>`;}catch(e){return "";}}).join(" · ") || "none captured"}</div>
   `;
   document.getElementById("dossierClose").addEventListener("click", closeDossier);
   overlay.classList.add("active");
+  fxOpenKey = fxKey(c);
+  if(CONFIG.FACTS) loadDeepFacts(idx);
 }
 function closeDossier(){ overlay.classList.remove("active"); dossierEl.classList.remove("compare-view"); }
 backdrop.addEventListener("click", closeDossier);
@@ -1192,6 +1461,7 @@ async function runSearch(){
     if(enrichWarnings.length) showErr("Results loaded, but gap-filling stopped early:\n• " + enrichWarnings.join("\n• "));
     originalCompanies = JSON.parse(JSON.stringify(currentCompanies));
     currentSearchedAt = Date.now();
+    if(CONFIG.FACTS) loadVitals();
     saveRecent(raw);
     try{
       const url = new URL(window.location.href);
@@ -1272,6 +1542,7 @@ async function runRefine(){
     }else{
       currentCompanies.forEach((c,i)=> field.appendChild(renderCard(c,i)));
     }
+    if(CONFIG.FACTS) loadVitals();
     refineNote.textContent = resp.note || `Refined to "${text}".`;
     refineNote.classList.add("active");
     refineClearBtn.classList.add("active");
