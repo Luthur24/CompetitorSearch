@@ -395,6 +395,16 @@ body.set-open .set-drawer{transform:none;visibility:visible;}
 .bc ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--text);line-height:1.65;}
 .bc .obj{margin:0 0 8px;font-size:13.5px;line-height:1.55;}
 .bc .obj b{color:var(--coral);font-weight:600;}
+
+/* ---------- pro export menu (themes + formats) ---------- */
+.export-menu{min-width:236px;}
+.exp-label{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding:6px 10px 2px;}
+.exp-themes{display:flex;flex-direction:column;gap:2px;margin-bottom:4px;}
+.exp-themes button{position:relative;}
+.exp-themes button i{width:12px;height:12px;border-radius:4px;border:1px solid var(--border);flex:none;display:inline-block;}
+.exp-themes button.on{color:var(--text);background:var(--surface);}
+.exp-themes button.on::after{content:"✓";margin-left:auto;color:var(--emerald);font-size:12px;}
+.exp-sep{height:1px;background:var(--border);margin:4px 6px;}
 </style>
 </head>
 <body>
@@ -451,14 +461,20 @@ body.set-open .set-drawer{transform:none;visibility:visible;}
           Export
         </button>
         <div class="export-menu" id="exportMenu">
-          <button type="button" id="exportCsvBtn">Download as CSV</button>
+          <div class="exp-label">Theme</div>
+          <div class="exp-themes" id="expThemes">
+            <button type="button" data-theme="black"><i style="background:#000;border-color:#fff"></i>Black</button>
+            <button type="button" data-theme="cs"><i style="background:#ff6b4a"></i>CompetitorSearch</button>
+            <button type="button" data-theme="standard"><i style="background:#fff;border-color:#1d4ed8"></i>Standard</button>
+          </div>
+          <div class="exp-label">Export everything as</div>
+          <button type="button" id="exportXlsxBtn">Excel (.xlsx)</button>
+          <button type="button" id="exportPptxBtn">PowerPoint (.pptx)</button>
+          <button type="button" id="exportPdfBtn">PDF</button>
+          <div class="exp-sep"></div>
           <button type="button" id="exportMdBtn">Copy as Markdown</button>
         </div>
       </div>
-      <button class="share-btn" id="shareBtn" type="button" aria-label="Share this search">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-        Share
-      </button>
     </div>
   </div>
   <div class="refine-bar">
@@ -659,10 +675,8 @@ const recentChips = document.getElementById("recentChips");
 const overlay = document.getElementById("overlay");
 const backdrop = document.getElementById("backdrop");
 const dossierEl = document.getElementById("dossier");
-const shareBtn = document.getElementById("shareBtn");
 const exportBtn = document.getElementById("exportBtn");
 const exportMenu = document.getElementById("exportMenu");
-const exportCsvBtn = document.getElementById("exportCsvBtn");
 const exportMdBtn = document.getElementById("exportMdBtn");
 const refineInput = document.getElementById("refineInput");
 const refineBtn = document.getElementById("refineBtn");
@@ -1481,45 +1495,6 @@ async function runSearch(){
 searchBtn.addEventListener("click", runSearch);
 queryInput.addEventListener("keydown", e=>{ if(e.key==="Enter") runSearch(); });
 
-/* ---------- share ---------- */
-function buildShareText(){
-  const top = currentCompanies.slice(0,5).map(c=>{
-    const sim = (c.similarity!==undefined && c.similarity!==null && c.similarity!=="") ? ` (${Math.round(Number(c.similarity))}% match)` : "";
-    return `• ${c.name}${sim} — ${c.tagline||""}`;
-  }).join("\n");
-  const label = currentSubjectLabel || currentRawQuery;
-  return `${label} — field via CompetitorSearch\n\n${top}`;
-}
-function buildShareUrl(){
-  try{
-    const url = new URL(window.location.href);
-    url.searchParams.set("q", currentRawQuery);
-    return url.toString();
-  }catch(e){ return window.location.href; }
-}
-async function shareResults(){
-  if(!currentRawQuery){ return; }
-  const text = buildShareText();
-  const url = buildShareUrl();
-  if(navigator.share){
-    try{
-      await navigator.share({ title: "CompetitorSearch", text, url });
-      return;
-    }catch(e){ /* user cancelled or unsupported — fall through to clipboard */ }
-  }
-  try{
-    await navigator.clipboard.writeText(`${text}\n\n${url}`);
-    shareBtn.classList.add("copied");
-    const original = shareBtn.textContent;
-    shareBtn.setAttribute("aria-live","polite");
-    shareBtn.textContent = "Copied";
-    setTimeout(()=>{ shareBtn.classList.remove("copied"); shareBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Share`; }, 1800);
-  }catch(e){
-    console.error(e); showErr("Couldn't copy the share link: " + errMsg(e));
-  }
-}
-if(shareBtn) shareBtn.addEventListener("click", shareResults);
-
 /* ---------- refine (re-filter existing field, no new web search) ---------- */
 async function runRefine(){
   const text = refineInput.value.trim();
@@ -1636,9 +1611,484 @@ async function copyMarkdown(){
   }
 }
 if(exportBtn) exportBtn.addEventListener("click", (e)=>{ e.stopPropagation(); toggleExportMenu(); });
-if(exportCsvBtn) exportCsvBtn.addEventListener("click", downloadCSV);
 if(exportMdBtn) exportMdBtn.addEventListener("click", copyMarkdown);
 document.addEventListener("click", (e)=>{ if(exportMenu.classList.contains("open") && !e.target.closest(".export-wrap")) closeExportMenu(); });
+
+/* =====================================================================
+   PRO EXPORT — Excel / PowerPoint / PDF, everything at once, 3 themes.
+   Exports every company with everything the page shows (card, dossier,
+   verified facts, evidence, battlecard). Facts + battlecards that were
+   never opened are gathered automatically first. Libraries load on demand.
+   ===================================================================== */
+const EXP_THEMES = {
+  black:    { label:"Black",            bg:"000000", surf:"0D0D0D", elev:"1A1A1A", border:"2B2B2B", text:"FFFFFF", dim:"A6A6A6", faint:"6E6E6E", accent:"FFFFFF", onAccent:"000000", good:"34D399", warn:"FFB454", bad:"FF6B6B" },
+  cs:       { label:"CompetitorSearch", bg:"0B0C0F", surf:"15171B", elev:"1C1F24", border:"262A31", text:"F7F8FA", dim:"9AA1AC", faint:"565D68", accent:"FF6B4A", onAccent:"0B0C0F", good:"34D399", warn:"FFB454", bad:"FF6B4A" },
+  standard: { label:"Standard",         bg:"FFFFFF", surf:"F6F7F9", elev:"ECEFF3", border:"D9DEE5", text:"14171C", dim:"566170", faint:"8A93A0", accent:"1D4ED8", onAccent:"FFFFFF", good:"047857", warn:"B45309", bad:"B91C1C" }
+};
+let expThemeKey = "cs";
+try{ expThemeKey = localStorage.getItem("cs_export_theme") || "cs"; }catch(e){}
+if(!EXP_THEMES[expThemeKey]) expThemeKey = "cs";
+
+const EXP_LIBS = {
+  jspdf:   "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+  pptx:    "https://cdnjs.cloudflare.com/ajax/libs/pptxgenjs/3.12.0/pptxgen.bundle.js",
+  exceljs: "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"
+};
+const expLoaded = {};
+function expLoad(k){
+  if(expLoaded[k]) return expLoaded[k];
+  expLoaded[k] = new Promise((res,rej)=>{
+    const s = document.createElement("script"); s.src = EXP_LIBS[k]; s.onload = res;
+    s.onerror = ()=>{ expLoaded[k] = null; rej(new Error("Couldn't load the export library — check your connection and try again")); };
+    document.head.appendChild(s);
+  });
+  return expLoaded[k];
+}
+
+/* ---------- small helpers ---------- */
+const expStr = v => v==null ? "" : String(v).replace(/\s+/g," ").trim();
+const expList = v => Array.isArray(v) ? v.map(expStr).filter(Boolean) : (expStr(v) ? [expStr(v)] : []);
+const expCut = (s,n) => { s = expStr(s); return s.length>n ? s.slice(0,n-1).trimEnd()+"…" : s; };
+const expLabel = () => expStr(currentSubjectLabel || currentRawQuery) || "Competitor research";
+const expSlug = () => expLabel().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40) || "competitorsearch";
+const expThreat = c => { const t = expStr(c.threat_level).toLowerCase(); return t.includes("high")?"High":t.includes("med")?"Medium":t.includes("low")?"Low":""; };
+const expSim = c => (c.similarity!==undefined && c.similarity!==null && c.similarity!=="" && isFinite(Number(c.similarity))) ? Math.round(Number(c.similarity)) : null;
+const expThreatColor = (T,t) => t==="High"?T.bad : t==="Medium"?T.warn : t==="Low"?T.good : T.dim;
+const expDate = () => new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+const expHex = h => h.length===6 ? h : h.replace("#","");
+function pdfSafe(s){
+  return String(s==null?"":s).replace(/[\u2018\u2019]/g,"'").replace(/[\u201C\u201D]/g,'"').replace(/\u2192/g,">").replace(/\u2713|\u2714/g,"")
+    .replace(/[^\x20-\x7E\u00A0-\u00FF\u2013\u2014\u2022\u2026]/g,"");
+}
+function expRR(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+
+/* ---------- logos (real favicon when CORS allows, lettered badge otherwise) ---------- */
+function expLogo(c){ return expLogoRaw(c).catch(()=>({ data:null, real:false })); }
+function expLogoRaw(c){
+  return new Promise(res=>{
+    const size = 128, cv = document.createElement("canvas"); cv.width = cv.height = size;
+    const g = cv.getContext("2d"); let settled = false; if(!g){ res({ data:null, real:false }); return; }
+    const fallback = ()=>{
+      try{
+        g.clearRect(0,0,size,size); g.fillStyle = colorFor(c.name); expRR(g,0,0,size,size,28); g.fill();
+        g.fillStyle = "#0b0c0f"; g.font = "700 56px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+        g.fillText(initials(c.name), size/2, size/2+3);
+        res({ data: cv.toDataURL("image/png"), real:false });
+      }catch(e){ res({ data:null, real:false }); }
+    };
+    const img = new Image(); img.crossOrigin = "anonymous";
+    const t = setTimeout(()=>{ if(!settled){ settled = true; fallback(); } }, 4000);
+    img.onload = ()=>{
+      if(settled) return; settled = true; clearTimeout(t);
+      try{
+        if(img.naturalWidth < 24) throw new Error("tiny");
+        g.clearRect(0,0,size,size); g.fillStyle = "#ffffff"; expRR(g,0,0,size,size,28); g.fill();
+        g.drawImage(img,20,20,size-40,size-40); res({ data: cv.toDataURL("image/png"), real:true });
+      }catch(e){ fallback(); }
+    };
+    img.onerror = ()=>{ if(!settled){ settled = true; clearTimeout(t); fallback(); } };
+    img.src = logoFor(c.name, c.domain);
+  });
+}
+
+/* ---------- gather: facts + battlecard for every company, then logos ---------- */
+async function expGather(onProgress){
+  const list = currentCompanies.slice();
+  const out = list.map(c=>({ c, rec:{}, logo:null }));
+  let i = 0, done = 0;
+  const worker = async ()=>{
+    while(i < out.length){
+      const item = out[i++]; const c = item.c;
+      if(CONFIG.FACTS){
+        const k = fxKey(c); let rec = FX.get(k); if(!rec){ rec = {}; FX.set(k, rec); }
+        if(!rec.deep){
+          try{
+            const topics = rec.vitals ? FX_DEEP_TOPICS : ["profile"].concat(FX_DEEP_TOPICS);
+            const d = await fxCall(c, topics);
+            if(d.profile && !rec.vitals) rec.vitals = d.profile;
+            rec.deep = d.evidence || {}; rec.deepErrors = d.errors || {}; rec.retrievedAt = d.retrieved_at;
+            fxFillEmpty(c, rec);
+          }catch(e){ console.warn("Export: facts failed for", c.name, e); rec.deepErr = errMsg(e); fxNotice(e); }
+        }
+        if(rec.deep && !rec.battlecard && !rec.bcLoading && Object.values(rec.deep).some(a=>a && a.length)){
+          try{ await buildBattlecard(c); }catch(e){ console.warn("Export: battlecard failed for", c.name, e); }
+        }
+      }
+      item.rec = FX.get(fxKey(c)) || {};
+      item.logo = await expLogo(c);
+      onProgress(++done, out.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, out.length) }, worker));
+  return out;
+}
+
+/* ---------- one normalized model per company, shared by all 3 formats ---------- */
+function expModel(item){
+  const c = item.c, rec = item.rec || {}, v = rec.vitals || {};
+  const tiles = [], used = new Set();
+  const add = (k,val)=>{ val = expStr(val); if(val && !used.has(k)){ used.add(k); tiles.push([k,val]); } };
+  add("Headquarters", c.geography || v.hq);
+  add("Headcount", c.team_size || (v.headcount ? fxNum(v.headcount) : ""));
+  add("Founded", c.founded || v.founded);
+  add("Funding", c.funding);
+  const skip = new Set(["name","description","foundedYear","workforce","headquarters"]), extra = {};
+  Object.entries(v.properties || {}).forEach(([k,val])=>{ if(!skip.has(k)) extra[k] = val; });
+  fxFlatten(extra, "", [], 0).forEach(([k,val])=>{ if(tiles.length < 8) add(expCut(String(k).split(" · ").slice(-2).join(" · "),24),val); });
+  const ev = rec.deep || {};
+  return {
+    name: expStr(c.name), domain: expStr(c.domain), tagline: expStr(c.tagline), logo: item.logo,
+    sim: expSim(c), threat: expThreat(c), conf: expStr(c.confidence) || "unclear",
+    tags: expList(c.tags), founded: expStr(c.founded || v.founded), positioning: expStr(c.positioning),
+    signals: expList(c.signals), tiles,
+    pricing: expStr(c.pricing), funding: expStr(c.funding), segment: expStr(c.segment), team: expStr(c.team_size || (v.headcount ? fxNum(v.headcount) : "")),
+    reviews: expStr(c.reviews), geography: expStr(c.geography || v.hq), integrations: expList(c.integrations),
+    news: expList(c.news), strengths: expList(c.strengths), weaknesses: expList(c.weaknesses),
+    evidence: FX_DEEP_TOPICS.map(t=>({ topic:t, label:FX_TOPIC_LABELS[t], items: (ev[t]||[]) })).filter(x=>x.items.length),
+    bc: rec.battlecard || null, profileUrl: v.source_url || "", retrievedAt: rec.retrievedAt || "",
+    hq: expStr(c.geography || v.hq), staff: expStr(c.team_size || (v.headcount ? fxNum(v.headcount) : ""))
+  };
+}
+const expBc = b => b ? {
+  summary: expStr(b.summary), win: expList(b.how_to_win), watch: expList(b.watch_outs),
+  obj: (Array.isArray(b.objections)?b.objections:[]).map(o=>[expStr(o.they_say),expStr(o.you_say)]).filter(o=>o[0]||o[1]),
+  ask: expList(b.questions_to_ask), gaps: expList(b.gaps)
+} : null;
+
+/* =====================================================================
+   PDF (jsPDF)
+   ===================================================================== */
+function expBuildPDF(items, T){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:"pt", format:"a4", compress:true });
+  const PW = 595.28, PH = 841.89, M = 40, CW = PW-2*M, TOP = 74, BOTTOM = PH-56;
+  const rgb = h=>[parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
+  const F = h=>doc.setFillColor(...rgb(h)), D = h=>doc.setDrawColor(...rgb(h)), C = h=>doc.setTextColor(...rgb(h));
+  const S = pdfSafe; let y = TOP, ctx = "";
+  const diamond = (cx,cy,r)=>{ F(T.accent); doc.triangle(cx,cy-r,cx+r,cy,cx,cy+r,"F"); doc.triangle(cx,cy-r,cx-r,cy,cx,cy+r,"F"); };
+  const txt = (s,x,yy,o={})=>{ doc.setFont(o.font||"helvetica",o.style||"normal"); doc.setFontSize(o.size||10); C(o.color||T.text); doc.text(S(s),x,yy,{align:o.align||"left"}); };
+  const wrap = (s,w,size,font="helvetica",style="normal")=>{ doc.setFont(font,style); doc.setFontSize(size); return doc.splitTextToSize(S(s),w); };
+  function page(first){
+    if(!first) doc.addPage();
+    F(T.bg); doc.rect(0,0,PW,PH,"F"); y = TOP;
+    if(!first){ diamond(M+4,40,4); txt("COMPETITORSEARCH",M+14,43,{font:"courier",style:"bold",size:8,color:T.dim}); txt(ctx.toUpperCase(),PW-M,43,{font:"courier",size:8,color:T.faint,align:"right"}); }
+  }
+  const ensure = h=>{ if(y+h > BOTTOM) page(false); };
+  const label = s=>{ ensure(26); txt(s.toUpperCase(),M,y+8,{font:"courier",style:"bold",size:7.5,color:T.faint}); y += 18; };
+  const box = (x,yy,w,h,fill)=>{ F(fill||T.surf); D(T.border); doc.setLineWidth(.7); doc.roundedRect(x,yy,w,h,7,7,"FD"); };
+  const pill = (s,x,yy,color,size=7)=>{ s = S(String(s).toUpperCase()); doc.setFont("courier","bold"); doc.setFontSize(size); const w = doc.getTextWidth(s)+12; D(color); doc.setLineWidth(.8); doc.roundedRect(x,yy,w,15,4,4,"S"); C(color); doc.text(s,x+6,yy+10.5); return w+6; };
+  const pills = (arr,color)=>{ let x = M; arr.forEach(t=>{ doc.setFont("courier","bold"); doc.setFontSize(7); const w = doc.getTextWidth(S(String(t).toUpperCase()))+18; if(x+w > M+CW){ x = M; y += 20; ensure(20); } x += pill(t,x,y,color); }); y += 22; };
+  const para = (s,x,w,size,color,o={})=>{ const ln = wrap(s,w,size,o.font,o.style), lead = o.lead || size*1.45; ensure(Math.min(ln.length*lead, 300)); ln.forEach(l=>{ ensure(lead); txt(l,x,y+size,{size,color,font:o.font,style:o.style}); y += lead; }); };
+  const bullets = (arr,color,w=CW)=>{ arr.forEach(s=>{ const ln = wrap(s,w-14,9.5); ensure(ln.length*14); F(color); doc.circle(M+3,y+6,1.7,"F"); ln.forEach(l=>{ txt(l,M+13,y+9,{size:9.5,color:T.dim}); y += 14; }); y += 1; }); };
+  const logo = (it,x,yy,sz)=>{ try{ doc.addImage(it.logo.data,"PNG",x,yy,sz,sz); }catch(e){ box(x,yy,sz,sz,T.elev); } };
+  const sectionTitle = s=>{ ensure(60); y += 6; D(T.accent); doc.setLineWidth(1.2); doc.line(M,y,M+22,y); y += 14; txt(s,M,y+8,{size:15,style:"bold"}); y += 26; };
+
+  const models = items.map(expModel), n = models.length;
+
+  /* cover */
+  ctx = "Cover"; page(true); diamond(M+12,118,13);
+  txt("COMPETITIVE INTELLIGENCE",M,236,{font:"courier",style:"bold",size:10,color:T.accent});
+  let ty = 282; wrap(expLabel(),CW,34,"helvetica","bold").slice(0,3).forEach(l=>{ txt(l,M,ty,{size:34,style:"bold"}); ty += 42; });
+  txt(`Verified competitor field report  ·  ${n} ${n===1?"company":"companies"}`,M,ty+8,{size:12,color:T.dim});
+  D(T.border); doc.setLineWidth(.7); doc.line(M,ty+34,PW-M,ty+34); ty += 62;
+  models.slice(0,12).forEach((m,i)=>{ const cx = M+(i%3)*172, cy = ty+Math.floor(i/3)*52; logo(m,cx,cy,34); txt(expCut(m.name,18),cx+44,cy+21,{size:10,style:"bold"}); });
+  if(n>12) txt(`+ ${n-12} more inside`,M,ty+Math.ceil(12/3)*52+8,{font:"courier",size:8,color:T.faint});
+  txt(`Generated ${expDate()}  ·  Live research, not a maintained profile`,M,PH-96,{font:"courier",size:8.5,color:T.faint});
+  txt("Facts sourced via Exa  ·  every item links to its source  ·  A = company site, B = press / reviews",M,PH-82,{font:"courier",size:8.5,color:T.faint});
+
+  /* overview */
+  ctx = "Field overview"; page(false); txt("Field overview",M,y+14,{size:22,style:"bold"}); y += 40;
+  const cols = [["COMPANY",M+50],["MATCH",250],["THREAT",300],["HQ",368],["STAFF",452],["FOUNDED",500]];
+  cols.forEach(([t,x])=>txt(t,x,y+8,{font:"courier",style:"bold",size:7,color:T.faint})); y += 16;
+  models.forEach(m=>{
+    ensure(62); box(M,y,CW,54); logo(m,M+10,y+11,32);
+    txt(expCut(m.name,26),M+52,y+23,{size:10.5,style:"bold"}); txt(expCut(m.tagline,42),M+52,y+37,{size:8,color:T.dim});
+    txt(m.sim!=null?m.sim+"%":"—",250,y+31,{size:10.5,style:"bold"});
+    if(m.threat) pill(m.threat,300,y+19,expThreatColor(T,m.threat),6.5);
+    txt(expCut(m.hq||"—",16),368,y+31,{size:8.5,color:T.dim}); txt(expCut(m.staff||"—",10),452,y+31,{size:8.5,color:T.dim}); txt(expCut(m.founded||"—",8),500,y+31,{size:8.5,color:T.dim});
+    y += 62;
+  });
+  if(models.some(m=>m.sim!=null)){
+    y += 14; label("Similarity to your search");
+    models.filter(m=>m.sim!=null).forEach(m=>{ ensure(24); txt(expCut(m.name,22),M,y+9,{size:9,color:T.dim}); box(M+130,y+1,CW-130-40,9,T.elev); F(T.accent); doc.roundedRect(M+130,y+1,Math.max(6,(CW-170)*m.sim/100),9,4.5,4.5,"F"); txt(m.sim+"%",PW-M,y+9,{size:9,style:"bold",align:"right"}); y += 22; });
+  }
+
+  /* dossiers */
+  models.forEach((m,mi)=>{
+    ctx = `${m.name}  ·  ${mi+1} of ${n}`; page(false);
+    logo(m,M,y-2,52); txt(expCut(m.name,30),M+66,y+18,{size:19,style:"bold"});
+    wrap(m.tagline,CW-66-130,9.5).slice(0,2).forEach((l,i)=>txt(l,M+66,y+34+i*12,{size:9.5,color:T.dim}));
+    let px = PW-M; if(m.threat){ doc.setFont("courier","bold"); doc.setFontSize(7); const w = doc.getTextWidth(S((m.threat+" threat").toUpperCase()))+18; px -= w; pill(m.threat+" threat",px,y+6,expThreatColor(T,m.threat)); px -= 6; }
+    if(m.sim!=null){ const s2 = m.sim+"% match"; doc.setFont("courier","bold"); doc.setFontSize(7); const w = doc.getTextWidth(S(s2.toUpperCase()))+18; px -= w; pill(s2,px,y+6,T.accent); }
+    y += 66;
+    if(m.tags.length || m.conf){ pills(m.tags.slice(0,8).concat(["confidence: "+m.conf]),T.dim); }
+    if(m.tiles.length){
+      const per = 4, tw = (CW-3*10)/per;
+      for(let r=0;r<Math.ceil(m.tiles.length/per);r++){ ensure(52);
+        m.tiles.slice(r*per,r*per+per).forEach(([k,val],i)=>{ const x = M+i*(tw+10); box(x,y,tw,44); txt(k.toUpperCase(),x+9,y+14,{font:"courier",style:"bold",size:6,color:T.faint}); wrap(expCut(val,40),tw-16,10.5,"helvetica","bold").slice(0,2).forEach((l,li)=>txt(l,x+9,y+28+li*11,{size:10.5,style:"bold"})); });
+        y += 52; }
+      if(m.profileUrl){ txt("Verified via "+(fxHost(m.profileUrl)||"exa.ai")+"  (B)",M,y+6,{font:"courier",size:7,color:T.good}); y += 16; }
+    }
+    label("Positioning"); para(m.positioning||"Not enough evidence to characterize positioning confidently.",M,CW,9.5,m.positioning?T.text:T.faint);
+    y += 6; label("Signals"); if(m.signals.length) bullets(m.signals,T.accent); else para("No specific signals found.",M,CW,9.5,T.faint);
+    [["Pricing & packaging",m.pricing],["Funding & stage",m.funding],["Team & target segment",[m.team,m.segment].filter(Boolean).join("  ·  ")],["Reviews",m.reviews],["Geography",m.geography]].forEach(([k,val])=>{
+      if(!val) return; y += 6; label(k); ensure(34); const ln = wrap(val,CW-24,9.5); const h = ln.length*14+14; ensure(h); box(M,y,CW,h); ln.forEach((l,i)=>txt(l,M+12,y+18+i*14,{size:9.5})); y += h+4; });
+    if(m.integrations.length){ y += 6; label("Integrations"); pills(m.integrations.slice(0,16),T.dim); }
+    if(m.strengths.length || m.weaknesses.length){
+      y += 6; label("Strengths & weaknesses"); const hw = (CW-16)/2;
+      const colLines = (arr,sign)=>arr.flatMap(s=>wrap(sign+" "+s,hw,9.5));
+      const a = colLines(m.strengths,"+"), b = colLines(m.weaknesses,"–"), rows = Math.max(a.length,b.length);
+      ensure(rows*14+8); a.forEach((l,i)=>txt(l,M,y+9+i*14,{size:9.5,color:T.good})); b.forEach((l,i)=>txt(l,M+hw+16,y+9+i*14,{size:9.5,color:T.bad})); y += rows*14+8;
+    }
+    if(m.news.length){ y += 6; label("Recent signals"); bullets(m.news,T.warn); }
+    if(m.evidence.length){
+      y += 8; sectionTitle("Verified evidence");
+      txt("Pulled live via Exa. A = the company's own site, B = press or review sites. Click a card to open its source.",M,y,{size:8,color:T.faint}); y += 14;
+      m.evidence.forEach(g=>{
+        y += 2; label(g.label);
+        g.items.forEach(it=>{
+          const tl = wrap(it.title||fxHost(it.url),CW-24,9.5,"helvetica","bold").slice(0,2);
+          const qs = (it.highlights||[]).slice(0,2).flatMap(q=>wrap("“"+expCut(q,260)+"”",CW-34,8).slice(0,3));
+          const h = 12+tl.length*12+16+qs.length*11+(qs.length?4:0)+8; ensure(h);
+          box(M,y,CW,h); let yy = y+16; tl.forEach(l=>{ txt(l,M+12,yy,{size:9.5,style:"bold"}); yy += 12; });
+          const gc = it.grade==="A"?T.good:T.dim; pill(it.grade||"B",M+12,yy-6,gc,6.5);
+          txt([fxHost(it.url), it.published?String(it.published).slice(0,10):""].filter(Boolean).join("   ·   "),M+34,yy+4,{font:"courier",size:7.5,color:T.faint}); yy += 20;
+          qs.forEach(l=>{ txt(l,M+16,yy,{size:8,color:T.dim,style:"italic"}); yy += 11; });
+          if(/^https?:/i.test(it.url||"")) doc.link(M,y,CW,h,{url:it.url});
+          y += h+8;
+        });
+      });
+    }
+    const b = expBc(m.bc);
+    if(b){
+      y += 8; sectionTitle("Battlecard — "+expCut(m.name,30));
+      if(b.summary){ const ln = wrap(b.summary,CW-28,9.5), h = ln.length*14+30; ensure(h); box(M,y,CW,h); txt("SUMMARY",M+14,y+15,{font:"courier",style:"bold",size:7,color:T.accent}); ln.forEach((l,i)=>txt(l,M+14,y+30+i*14,{size:9.5})); y += h+12; }
+      if(b.win.length || b.watch.length){
+        const hw = (CW-16)/2; label("How to win"); y -= 18; txt("WATCH OUT FOR",M+hw+16,y+8,{font:"courier",style:"bold",size:7.5,color:T.faint}); y += 18;
+        const a = b.win.flatMap(s=>wrap("> "+s,hw,9.5)), c2 = b.watch.flatMap(s=>wrap("! "+s,hw,9.5)), rows = Math.max(a.length,c2.length);
+        ensure(rows*14+8); a.forEach((l,i)=>txt(l,M,y+9+i*14,{size:9.5})); c2.forEach((l,i)=>txt(l,M+hw+16,y+9+i*14,{size:9.5})); y += rows*14+10;
+      }
+      if(b.obj.length){ y += 4; label("Objection handling"); b.obj.forEach(([they,you])=>{ const tl = wrap(they,CW-100,9.5,"helvetica","bold"), yl = wrap(you,CW-100,9.5), h = (tl.length+yl.length)*13+24; ensure(h); box(M,y,CW,h);
+        txt("THEY SAY",M+12,y+16,{font:"courier",style:"bold",size:7,color:T.bad}); tl.forEach((l,i)=>txt(l,M+78,y+16+i*13,{size:9.5,style:"bold"}));
+        const y2 = y+16+tl.length*13+4; txt("YOU SAY",M+12,y2,{font:"courier",style:"bold",size:7,color:T.good}); yl.forEach((l,i)=>txt(l,M+78,y2+i*13,{size:9.5,color:T.dim})); y += h+8; }); }
+      if(b.ask.length){ y += 4; label("Questions that expose their weak spots"); bullets(b.ask,T.warn); }
+      if(b.gaps.length){ y += 4; label("Could not verify"); bullets(b.gaps,T.faint); }
+      if(m.retrievedAt) txt("Evidence retrieved "+String(m.retrievedAt).slice(0,16).replace("T"," ")+" UTC. Verify anything decision-critical at the linked source.",M,y+8,{font:"courier",size:7,color:T.faint});
+    }else if(CONFIG.FACTS){ y += 8; label("Battlecard"); para("No sourced evidence was found for this company, so no battlecard was built.",M,CW,9,T.faint); }
+  });
+
+  /* sources */
+  if(currentSources && currentSources.length){
+    ctx = "Sources"; page(false); txt("Sources",M,y+14,{size:22,style:"bold"}); y += 40; label("Pages used for this research");
+    currentSources.slice(0,30).forEach(u=>{ ensure(18); doc.setFont("helvetica","normal"); doc.setFontSize(9); C(T.accent); doc.textWithLink(S(expCut(u,96)),M,y+9,{url:u}); y += 16; });
+  }
+
+  /* footers */
+  const total = doc.getNumberOfPages();
+  for(let p=2;p<=total;p++){ doc.setPage(p); D(T.border); doc.setLineWidth(.6); doc.line(M,PH-40,PW-M,PH-40);
+    txt("CompetitorSearch  ·  "+expCut(expLabel(),60),M,PH-26,{font:"courier",size:7.5,color:T.faint}); txt(p+" / "+total,PW-M,PH-26,{font:"courier",size:7.5,color:T.faint,align:"right"}); }
+  doc.setProperties({ title:"CompetitorSearch — "+expLabel(), author:"CompetitorSearch" });
+  return doc;
+}
+
+/* =====================================================================
+   POWERPOINT (pptxgenjs)
+   ===================================================================== */
+function expBuildPPTX(items, T){
+  const p = new PptxGenJS(); p.layout = "LAYOUT_16x9"; p.title = "CompetitorSearch — "+expLabel();
+  const F = "Arial", MONO = "Courier New", models = items.map(expModel), n = models.length;
+  const SH = p.ShapeType || (p.shapes);
+  const img = it => (it.logo && it.logo.data) ? it.logo.data.replace(/^data:/,"") : null;
+  const tb = (s,t,x,y,w,h,o={})=>s.addText(t,Object.assign({x,y,w,h,fontFace:F,fontSize:10,color:T.text,margin:0,valign:"top",isTextBox:true},o));
+  const lab = (s,t,x,y,w=3)=>tb(s,t.toUpperCase(),x,y,w,0.2,{fontFace:MONO,fontSize:7.5,bold:true,color:T.faint});
+  const card = (s,x,y,w,h,fill)=>s.addShape(SH.roundRect,{x,y,w,h,rectRadius:0.08,fill:{color:fill||T.surf},line:{color:T.border,width:0.75}});
+  const pill = (s,t,x,y,w,col)=>{ s.addShape(SH.roundRect,{x,y,w,h:0.24,rectRadius:0.05,fill:{color:T.bg},line:{color:col,width:1}}); tb(s,String(t).toUpperCase(),x,y,w,0.24,{align:"center",valign:"middle",fontFace:MONO,fontSize:7.5,bold:true,color:col}); };
+  const logo = (s,m,x,y,sz)=>{ const d = img(m); if(d) s.addImage({data:d,x,y,w:sz,h:sz}); };
+  const diamond = (s,x,y,sz)=>s.addShape(SH.rect,{x,y,w:sz,h:sz,fill:{color:T.accent},line:{color:T.accent},rotate:45});
+  const newSlide = (sub)=>{ const s = p.addSlide(); s.background = {color:T.bg}; diamond(s,0.45,0.33,0.1);
+    tb(s,"COMPETITORSEARCH",0.65,0.27,3,0.25,{fontFace:MONO,fontSize:8,bold:true,color:T.dim});
+    tb(s,expCut(sub||"",70).toUpperCase(),4.6,0.27,4.95,0.25,{align:"right",fontFace:MONO,fontSize:8,color:T.faint});
+    tb(s,"Generated "+expDate()+"  ·  Facts via Exa  ·  A = company site, B = press / reviews",0.45,5.3,9.1,0.2,{fontFace:MONO,fontSize:6.5,color:T.faint}); return s; };
+  const bl = (arr,max,len)=>arr.slice(0,max).map((t,i,a)=>({text:expCut(t,len),options:{bullet:true,breakLine:i<a.length-1}}));
+
+  /* title */
+  let s = p.addSlide(); s.background = {color:T.bg}; diamond(s,0.6,0.7,0.2);
+  tb(s,"COMPETITIVE INTELLIGENCE",0.6,1.5,6,0.3,{fontFace:MONO,fontSize:11,bold:true,color:T.accent});
+  const L = expLabel(); tb(s,L,0.6,1.9,8.8,1.5,{fontSize:L.length>36?30:38,bold:true});
+  tb(s,`Verified competitor field report  ·  ${n} ${n===1?"company":"companies"}`,0.6,3.55,8,0.35,{fontSize:14,color:T.dim});
+  models.slice(0,10).forEach((m,i)=>logo(s,m,0.6+i*0.72,4.3,0.55));
+  tb(s,"Generated "+expDate()+"  ·  Live research, not a maintained profile",0.6,5.2,8,0.22,{fontFace:MONO,fontSize:8,color:T.faint});
+
+  /* overview (4 per slide) + chart */
+  for(let k=0;k<n;k+=4){
+    s = newSlide("Field overview"); tb(s,"Field overview"+(n>4?`  (${k/4+1}/${Math.ceil(n/4)})`:""),0.45,0.6,8,0.5,{fontSize:24,bold:true});
+    [["COMPANY",1.25],["MATCH",4.0],["THREAT",4.8],["HQ",5.9],["STAFF",7.3],["FUNDING",8.1]].forEach(([t,x])=>tb(s,t,x,1.28,1.5,0.2,{fontFace:MONO,fontSize:7.5,bold:true,color:T.faint}));
+    models.slice(k,k+4).forEach((m,i)=>{ const y = 1.55+i*0.92; card(s,0.45,y,9.1,0.8); logo(s,m,0.6,y+0.15,0.5);
+      tb(s,expCut(m.name,28),1.25,y+0.12,2.7,0.3,{fontSize:13,bold:true}); tb(s,expCut(m.tagline,46),1.25,y+0.44,2.7,0.25,{fontSize:8.5,color:T.dim});
+      tb(s,m.sim!=null?m.sim+"%":"—",4.0,y+0.22,0.7,0.35,{fontSize:14,bold:true});
+      if(m.threat) pill(s,m.threat,4.8,y+0.27,0.85,expThreatColor(T,m.threat));
+      tb(s,expCut(m.hq||"—",18),5.9,y+0.26,1.35,0.3,{color:T.dim}); tb(s,expCut((m.staff||"—").replace(/\s*employees?/i,""),10),7.3,y+0.26,0.75,0.3,{color:T.dim});
+      tb(s,expCut((m.funding||"—").split(/[·,]/)[0],16),8.1,y+0.26,1.4,0.3,{fontSize:10.5,bold:true}); });
+  }
+  const sims = models.filter(m=>m.sim!=null);
+  if(sims.length>1){ s = newSlide("Similarity"); tb(s,"Similarity to your search",0.45,0.6,8,0.5,{fontSize:24,bold:true});
+    s.addChart(p.charts.BAR,[{name:"Match %",labels:sims.map(m=>expCut(m.name,22)),values:sims.map(m=>m.sim)}],{x:0.45,y:1.3,w:9.1,h:3.9,barDir:"bar",chartColors:[T.accent],catAxisLabelColor:T.dim,valAxisHidden:true,valGridLine:{style:"none"},catGridLine:{style:"none"},showValue:true,dataLabelColor:T.text,dataLabelFontSize:10,catAxisLabelFontSize:10,catAxisLabelFontFace:F,showLegend:false,valAxisMaxVal:100,valAxisMinVal:0,catAxisOrientation:"maxMin"}); }
+
+  /* per company */
+  models.forEach((m,mi)=>{
+    const sub = `${m.name}  ·  ${mi+1} of ${n}`;
+    s = newSlide(sub); logo(s,m,0.45,0.55,0.62);
+    tb(s,expCut(m.name,30),1.2,0.55,4.8,0.38,{fontSize:22,bold:true}); tb(s,expCut(m.tagline,90),1.2,0.95,5.2,0.25,{fontSize:10.5,color:T.dim});
+    let px = 9.55; if(m.threat){ px -= 1.15; pill(s,m.threat+" threat",px,0.62,1.15,expThreatColor(T,m.threat)); px -= 0.1; } if(m.sim!=null){ px -= 1.05; pill(s,m.sim+"% match",px,0.62,1.05,T.accent); }
+    const tiles = m.tiles.slice(0,8), rows = Math.max(1,Math.ceil(tiles.length/4)); let cy = 1.4;
+    for(let r=0;r<rows;r++){ tiles.slice(r*4,r*4+4).forEach(([k,v],i)=>{ const x = 0.45+i*2.3; card(s,x,cy,2.15,0.55); lab(s,k,x+0.1,cy+0.06,1.95); tb(s,expCut(v,26),x+0.1,cy+0.26,1.95,0.26,{fontSize:11,bold:true}); }); cy += 0.63; }
+    cy += 0.08;
+    lab(s,"Positioning",0.45,cy,3); tb(s,expCut(m.positioning||"Not enough evidence to characterize positioning confidently.",330),0.45,cy+0.24,4.4,1.05,{fontSize:9.5,color:m.positioning?T.text:T.faint});
+    const sy = cy+1.35; lab(s,"Signals",0.45,sy,3);
+    tb(s,m.signals.length?bl(m.signals,4,95):"No specific signals found.",0.45,sy+0.24,4.4,Math.max(0.5,5.2-(sy+0.3)),{fontSize:9,color:T.dim,paraSpaceAfter:2});
+    const facts = [["Pricing",m.pricing],["Funding",m.funding],["Segment",[m.team,m.segment].filter(Boolean).join(" · ")],["Reviews",m.reviews]].filter(f=>f[1]);
+    let ry = cy; if(facts.length){ const fh = Math.min(1.55,0.28+facts.length*0.3); card(s,5.0,ry,4.55,fh); lab(s,"Key facts",5.12,ry+0.07,3);
+      tb(s,facts.map((f,i)=>[{text:f[0]+"  ",options:{bold:true,color:T.accent,fontSize:8.5}},{text:expCut(f[1],85),options:{color:T.text,fontSize:9,breakLine:i<facts.length-1}}]).flat(),5.12,ry+0.3,4.3,fh-0.34,{paraSpaceAfter:2}); ry += fh+0.1; }
+    if(m.strengths.length||m.weaknesses.length){ const runs = [];
+      m.strengths.slice(0,3).forEach(t=>runs.push({text:"+ "+expCut(t,70),options:{color:T.good,breakLine:true}})); m.weaknesses.slice(0,3).forEach(t=>runs.push({text:"– "+expCut(t,70),options:{color:T.bad,breakLine:true}}));
+      lab(s,"Strengths & weaknesses",5.0,ry,3); tb(s,runs,5.0,ry+0.24,4.55,Math.max(0.5,5.2-(ry+0.3)),{fontSize:9,paraSpaceAfter:2}); }
+    tb(s,[m.tags.length?"TAGS  "+m.tags.slice(0,6).join(" · ")+"    ":"",  "CONFIDENCE  "+m.conf].join(""),0.45,5.05,9.1,0.2,{fontFace:MONO,fontSize:7,color:T.faint});
+
+    if(m.news.length || m.integrations.length || m.reviews){
+      s = newSlide(sub+" · more"); tb(s,"More on "+expCut(m.name,26),0.45,0.6,8,0.45,{fontSize:20,bold:true});
+      let yy = 1.3;
+      if(m.news.length){ lab(s,"Recent signals",0.45,yy,3); tb(s,bl(m.news,5,130),0.45,yy+0.24,9,1.5,{fontSize:10,color:T.dim,paraSpaceAfter:3}); yy += 0.35+Math.min(5,m.news.length)*0.3; }
+      if(m.integrations.length){ lab(s,"Integrations",0.45,yy,3); tb(s,m.integrations.slice(0,14).join("  ·  "),0.45,yy+0.24,9,0.5,{fontSize:10,color:T.text}); yy += 0.75; }
+      if(m.geography){ lab(s,"Geography",0.45,yy,3); tb(s,expCut(m.geography,160),0.45,yy+0.24,9,0.4,{fontSize:10,color:T.text}); yy += 0.65; }
+      if(m.reviews){ lab(s,"Reviews",0.45,yy,3); tb(s,expCut(m.reviews,260),0.45,yy+0.24,9,0.8,{fontSize:10,color:T.text}); }
+    }
+    for(let k=0;k<m.evidence.length;k+=4){
+      s = newSlide(sub+" · evidence"); tb(s,"Verified evidence — "+expCut(m.name,22),0.45,0.6,9,0.45,{fontSize:20,bold:true});
+      m.evidence.slice(k,k+4).forEach((g,i)=>{ const x = 0.45+(i%2)*4.6, y = 1.3+Math.floor(i/2)*1.95; card(s,x,y,4.45,1.85); lab(s,g.label,x+0.12,y+0.08,4.2);
+        const runs = []; g.items.slice(0,2).forEach((it,j,a)=>{ runs.push({text:(it.grade||"B")+"  ",options:{bold:true,color:it.grade==="A"?T.good:T.dim,fontFace:MONO,fontSize:8}});
+          runs.push({text:expCut(it.title||fxHost(it.url),62),options:{bold:true,color:T.text,fontSize:9,hyperlink:/^https?:/i.test(it.url||"")?{url:it.url}:undefined,breakLine:true}});
+          runs.push({text:fxHost(it.url)+(it.published?"  ·  "+String(it.published).slice(0,10):""),options:{color:T.faint,fontFace:MONO,fontSize:7,breakLine:true}});
+          const q = (it.highlights||[])[0]; if(q) runs.push({text:"“"+expCut(q,120)+"”",options:{color:T.dim,italic:true,fontSize:8,breakLine:j<a.length-1}}); });
+        tb(s,runs,x+0.12,y+0.34,4.2,1.45,{paraSpaceAfter:1}); });
+    }
+    const b = expBc(m.bc);
+    if(b){
+      s = newSlide(sub+" · battlecard"); tb(s,"Battlecard — "+expCut(m.name,24),0.45,0.6,9,0.45,{fontSize:20,bold:true});
+      card(s,0.45,1.2,9.1,0.8); lab(s,"Summary",0.6,1.27,2); tb(s,expCut(b.summary,230),0.6,1.5,8.8,0.5,{fontSize:10});
+      lab(s,"How to win",0.45,2.12,3); lab(s,"Watch out for",5.0,2.12,3);
+      tb(s,bl(b.win,4,90),0.45,2.36,4.4,1.1,{fontSize:9.5,paraSpaceAfter:2}); tb(s,bl(b.watch,4,90),5.0,2.36,4.5,1.1,{fontSize:9.5,paraSpaceAfter:2});
+      lab(s,"Objection handling",0.45,3.5,3);
+      b.obj.slice(0,2).forEach(([they,you],i)=>{ const y = 3.76+i*0.68; card(s,0.45,y,9.1,0.6); tb(s,"THEY SAY",0.6,y+0.07,0.9,0.2,{fontFace:MONO,fontSize:7,bold:true,color:T.bad}); tb(s,expCut(they,120),1.55,y+0.05,7.9,0.24,{fontSize:9.5,bold:true});
+        tb(s,"YOU SAY",0.6,y+0.33,0.9,0.2,{fontFace:MONO,fontSize:7,bold:true,color:T.good}); tb(s,expCut(you,140),1.55,y+0.31,7.9,0.26,{fontSize:9,color:T.dim}); });
+      if(b.ask.length || b.gaps.length || b.obj.length>2){
+        s = newSlide(sub+" · battlecard"); tb(s,"Battlecard — questions & gaps",0.45,0.6,9,0.45,{fontSize:20,bold:true}); let yy = 1.3;
+        if(b.obj.length>2){ lab(s,"More objections",0.45,yy,3); b.obj.slice(2,5).forEach(([they,you],i)=>{ const y = yy+0.26+i*0.5; tb(s,[{text:expCut(they,80)+"  ",options:{bold:true,color:T.bad}},{text:"→ "+expCut(you,110),options:{color:T.dim}}],0.45,y,9.1,0.45,{fontSize:9}); }); yy += 0.35+Math.min(3,b.obj.length-2)*0.5; }
+        if(b.ask.length){ lab(s,"Questions that expose their weak spots",0.45,yy,5); tb(s,bl(b.ask,5,120),0.45,yy+0.24,9,1.3,{fontSize:10,paraSpaceAfter:3}); yy += 0.4+Math.min(5,b.ask.length)*0.28; }
+        if(b.gaps.length){ lab(s,"Could not verify",0.45,yy,3); tb(s,bl(b.gaps,4,120),0.45,yy+0.24,9,1,{fontSize:10,color:T.faint,paraSpaceAfter:3}); }
+      }
+    }
+  });
+  if(currentSources && currentSources.length){ s = newSlide("Sources"); tb(s,"Sources",0.45,0.6,8,0.45,{fontSize:22,bold:true});
+    tb(s,currentSources.slice(0,14).map((u,i,a)=>({text:expCut(u,100),options:{color:T.accent,hyperlink:{url:u},breakLine:i<a.length-1}})),0.45,1.3,9.1,3.8,{fontSize:9.5,paraSpaceAfter:3}); }
+  return p;
+}
+
+/* =====================================================================
+   EXCEL (ExcelJS) — styled sheets with logos
+   ===================================================================== */
+async function expBuildXLSX(items, T){
+  const wb = new ExcelJS.Workbook(); wb.creator = "CompetitorSearch"; wb.created = new Date();
+  const models = items.map(expModel), A = h=>"FF"+h;
+  const fillC = h=>({type:"pattern",pattern:"solid",fgColor:{argb:A(h)}});
+  const edge = {style:"thin",color:{argb:A(T.border)}}, box = {top:edge,bottom:edge,left:edge,right:edge};
+  function sheet(name,title,sub,widths){
+    const ws = wb.addWorksheet(name,{views:[{showGridLines:false,state:"frozen",ySplit:6}]});
+    ws.getColumn(1).width = 3; widths.forEach((w,i)=>ws.getColumn(i+2).width = w);
+    ws.getCell("B2").value = "◆  COMPETITORSEARCH"; ws.getCell("B2").font = {name:"Arial",size:9,bold:true,color:{argb:A(T.accent)}};
+    ws.getCell("B3").value = title; ws.getCell("B3").font = {name:"Arial",size:22,bold:true,color:{argb:A(T.text)}}; ws.getRow(3).height = 34;
+    ws.getCell("B4").value = sub; ws.getCell("B4").font = {name:"Arial",size:9,color:{argb:A(T.faint)}};
+    ws._w = widths.length; return ws;
+  }
+  const header = (ws,cols)=>{ cols.forEach((t,i)=>{ const c = ws.getCell(6,i+2); c.value = t.toUpperCase(); c.font = {name:"Arial",size:8,bold:true,color:{argb:A(T.faint)}}; c.fill = fillC(T.elev); c.border = box; c.alignment = {vertical:"middle",indent:1}; }); ws.getRow(6).height = 22; };
+  const put = (ws,row,vals,o={})=>{ vals.forEach((v,i)=>{ const c = ws.getCell(row,i+2); c.value = v; const col = (o.colors&&o.colors[i]) || (i===(o.boldCol??0)?T.text:T.dim);
+      c.font = {name:"Arial",size:10,bold:i===(o.boldCol??0)||!!(o.colors&&o.colors[i]),color:{argb:A(col)}}; c.fill = fillC(T.surf); c.border = box; c.alignment = {vertical:"middle",wrapText:true,indent:1}; }); if(o.h) ws.getRow(row).height = o.h; };
+  const finish = (ws,lastRow)=>{ for(let r=1;r<=lastRow+12;r++) for(let c=1;c<=ws._w+2;c++){ const cell = ws.getCell(r,c); if(!cell.fill || !cell.fill.fgColor) cell.fill = fillC(T.bg); } };
+  const link = (u,label)=>/^https?:/i.test(u||"") ? {text:label||u,hyperlink:u} : (label||u||"");
+
+  /* Overview with logos */
+  let ws = sheet("Overview",expLabel(),`${models.length} companies · generated ${expDate()} · facts via Exa`,[8,24,10,11,13,18,14,10,28,28,24,30,44]);
+  header(ws,["","Company","Match","Threat","Confidence","HQ","Staff","Founded","Funding","Pricing","Segment","Tags","Tagline"]);
+  models.forEach((m,i)=>{ const r = 7+i; put(ws,r,["",m.name,m.sim!=null?m.sim/100:"",m.threat,m.conf,m.hq,m.staff,m.founded,m.funding,m.pricing,m.segment,m.tags.join(", "),m.tagline],{boldCol:1,h:36,colors:{3:m.threat?expThreatColor(T,m.threat):null}});
+    ws.getCell(r,4).numFmt = "0%";
+    if(m.logo && m.logo.data){ try{ const id = wb.addImage({base64:m.logo.data,extension:"png"}); ws.addImage(id,{tl:{col:1.15,row:r-1+0.12},ext:{width:28,height:28}}); }catch(e){} } });
+  const avgRow = 7+models.length; put(ws,avgRow,["","Average / total",{formula:`IFERROR(AVERAGE(D7:D${avgRow-1}),"")`},"","","","","","","","","",""],{boldCol:1,h:26});
+  ws.getCell(avgRow,4).numFmt = "0%"; for(let c=2;c<=14;c++){ ws.getCell(avgRow,c).fill = fillC(T.elev); ws.getCell(avgRow,c).font = {name:"Arial",size:10,bold:true,color:{argb:A(T.text)}}; }
+  ws.getCell(avgRow+2,2).value = "Match = how closely each company matches your search. Facts marked verified come from Exa company profiles — see Evidence for sources."; ws.getCell(avgRow+2,2).font = {name:"Arial",size:9,italic:true,color:{argb:A(T.faint)}};
+  finish(ws,avgRow+2);
+
+  /* Profiles (all card + dossier text) */
+  ws = sheet("Profiles","Company profiles","Everything shown on each card and dossier",[24,50,40,40,40,40,26,40,28,36,36]);
+  header(ws,["Company","Positioning","Signals","Strengths","Weaknesses","Recent signals","Integrations","Reviews","Geography","Pricing & packaging","Funding & stage"]);
+  models.forEach((m,i)=>put(ws,7+i,[m.name,m.positioning,m.signals.map(s=>"• "+s).join("\n"),m.strengths.map(s=>"+ "+s).join("\n"),m.weaknesses.map(s=>"– "+s).join("\n"),m.news.map(s=>"• "+s).join("\n"),m.integrations.join(", "),m.reviews,m.geography,m.pricing,m.funding],{colors:{3:T.good,4:T.bad}}));
+  finish(ws,6+models.length);
+
+  /* Verified facts */
+  ws = sheet("Verified facts","Verified facts","Vitals from Exa company profiles · grade B = structured profile",[24,26,40,8,34]);
+  header(ws,["Company","Fact","Value","Grade","Source"]); let r = 7;
+  models.forEach(m=>m.tiles.forEach(([k,v])=>{ put(ws,r,[m.name,k,v,"B",""]); if(m.profileUrl){ ws.getCell(r,6).value = link(m.profileUrl,fxHost(m.profileUrl)); ws.getCell(r,6).font = {name:"Arial",size:10,color:{argb:A(T.accent)},underline:true}; } r++; }));
+  finish(ws,r);
+
+  /* Evidence */
+  ws = sheet("Evidence","Evidence","Quotes pulled live from sourced pages · A = company site, B = press / reviews",[24,24,46,8,22,12,70]);
+  header(ws,["Company","Topic","Title (click to open)","Grade","Source","Date","Quote"]); r = 7;
+  models.forEach(m=>m.evidence.forEach(g=>g.items.forEach(it=>{ put(ws,r,[m.name,g.label,it.title||fxHost(it.url),it.grade||"B",fxHost(it.url),it.published?String(it.published).slice(0,10):"",(it.highlights||[]).slice(0,2).map(q=>"“"+expCut(q,400)+"”").join("\n")],{colors:{3:it.grade==="A"?T.good:T.dim}});
+    if(/^https?:/i.test(it.url||"")){ const c = ws.getCell(r,4); c.value = link(it.url,it.title||fxHost(it.url)); c.font = {name:"Arial",size:10,color:{argb:A(T.accent)},underline:true}; } r++; })));
+  finish(ws,r);
+
+  /* Battlecards */
+  ws = sheet("Battlecards","Battlecards","Built only from the verified evidence · gaps listed per company",[24,22,56,70]);
+  header(ws,["Company","Section","Point","Detail"]); r = 7;
+  models.forEach(m=>{ const b = expBc(m.bc); if(!b) return;
+    const rows = []; if(b.summary) rows.push(["Summary",b.summary,""]); b.win.forEach(x=>rows.push(["How to win",x,""])); b.watch.forEach(x=>rows.push(["Watch out for",x,""]));
+    b.obj.forEach(([a,c])=>rows.push(["Objection",a,c])); b.ask.forEach(x=>rows.push(["Question to ask",x,""])); b.gaps.forEach(x=>rows.push(["Could not verify",x,""]));
+    rows.forEach((x,i)=>{ put(ws,r,[m.name].concat(x),{colors:{1:x[0]==="Watch out for"||x[0]==="Objection"?T.bad:(x[0]==="How to win"?T.good:T.accent)}}); r++; }); });
+  finish(ws,r);
+
+  /* Sources */
+  if(currentSources && currentSources.length){ ws = sheet("Sources","Sources","Pages used for this research",[90]); header(ws,["URL"]);
+    currentSources.slice(0,40).forEach((u,i)=>{ put(ws,7+i,[""]); const c = ws.getCell(7+i,2); c.value = link(u,u); c.font = {name:"Arial",size:10,color:{argb:A(T.accent)},underline:true}; }); finish(ws,6+Math.min(40,currentSources.length)); }
+  return wb;
+}
+
+/* ---------- run ---------- */
+function expDownload(blob,name){
+  const url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
+}
+let expBusy = false;
+async function runExport(kind){
+  if(expBusy) return;
+  if(!currentCompanies.length){ showErr("Run a search first, then export."); return; }
+  expBusy = true; closeExportMenu(); clearErr();
+  const T = EXP_THEMES[expThemeKey], slug = expSlug(), nice = {pdf:"PDF",pptx:"PowerPoint",xlsx:"Excel"}[kind];
+  try{
+    setStatus("Preparing your "+nice+" export…");
+    const lib = expLoad(kind==="pdf"?"jspdf":kind==="pptx"?"pptx":"exceljs");
+    const items = await expGather((d,n)=>setStatus(`Gathering verified facts and battlecards… ${d}/${n} companies`));
+    await lib; setStatus("Designing your "+nice+" file…");
+    if(kind==="pdf"){ expBuildPDF(items,T).save(slug+".pdf"); }
+    else if(kind==="pptx"){ await expBuildPPTX(items,T).writeFile({fileName:slug+".pptx"}); }
+    else{ const wb = await expBuildXLSX(items,T); const buf = await wb.xlsx.writeBuffer(); expDownload(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),slug+".xlsx"); }
+    setStatus(nice+" export ready ✓"); setTimeout(hideStatus,2200);
+  }catch(e){ console.error("Export failed:",e); hideStatus(); showErr("Export failed: "+errMsg(e)); }
+  finally{ expBusy = false; }
+}
+function expPaintThemes(){ document.querySelectorAll("#expThemes button").forEach(b=>b.classList.toggle("on", b.dataset.theme===expThemeKey)); }
+document.querySelectorAll("#expThemes button").forEach(b=>b.addEventListener("click",e=>{ e.stopPropagation(); expThemeKey = b.dataset.theme; try{ localStorage.setItem("cs_export_theme",expThemeKey); }catch(_){} expPaintThemes(); }));
+expPaintThemes();
+[["exportXlsxBtn","xlsx"],["exportPptxBtn","pptx"],["exportPdfBtn","pdf"]].forEach(([id,k])=>{ const el = document.getElementById(id); if(el) el.addEventListener("click",()=>runExport(k)); });
+
+
 
 /* ---------- compare ---------- */
 function updateCompareBar(){
